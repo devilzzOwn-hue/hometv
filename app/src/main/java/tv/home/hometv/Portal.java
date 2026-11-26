@@ -182,7 +182,7 @@ public class Portal {
         JSONObject js = d.optJSONObject("js");
         if (js != null && !js.optString("block_msg", "").isEmpty()) {
             token = null;
-            throw new PortalException("Portal says: " + js.optString("block_msg"));
+            throw new PortalException("Portal says: " + js.optString("block_msg").replaceAll("(?i)<br\\s*/?>", " ").replaceAll("<[^>]+>", "").replaceAll("\\s+", " ").trim());
         }
     }
 
