@@ -357,15 +357,52 @@ public class Portal {
     }
 
     // ---------------------------------------------------------------- playback
-    public String link(String kind, String cmd, String series) throws PortalException {
-        Object js = call(map("type", "live".equals(kind) ? "itv" : "vod", "action", "create_link",
+    private static final String PREFIX = "^\\s*(ffmpeg|ffrt\\d*|auto)\\s+";
+
+    private Object createLink(String kind, String cmd, String series) throws PortalException {
+        return call(map("type", "live".equals(kind) ? "itv" : "vod", "action", "create_link",
                 "cmd", cmd, "series", series == null ? "" : series, "forced_storage", "undefined",
-                "disable_ad", "0", "download", "0"), 25000);
-        String prefix = "^\\s*(ffmpeg|ffrt\\d*|auto)\\s+";
-        String url = js instanceof JSONObject ? ((JSONObject) js).optString("cmd", "") : "";
-        url = url.replaceAll(prefix, "").trim();
-        if (!url.startsWith("http")) url = String.valueOf(cmd).replaceAll(prefix, "").trim();
-        if (!url.startsWith("http")) throw new PortalException("The portal didn't return a playable link for this item");
+                "disable_ad", "0", "download", "0", "JsHttpRequest", "1-xml"), 25000);
+    }
+
+    private static String extract(Object js) {
+        if (!(js instanceof JSONObject)) return null;
+        String url = ((JSONObject) js).optString("cmd", "").replaceAll(PREFIX, "").trim();
+        return url.startsWith("http") ? url : null;
+    }
+
+    private static String snippet(Object js) {
+        String t = String.valueOf(js);
+        return t.length() > 220 ? t.substring(0, 220) + "…" : t;
+    }
+
+    public String link(String kind, String cmd, String series, String id) throws PortalException {
+        Object js = createLink(kind, cmd, series);
+        String url = extract(js);
+        Object last = js;
+        if (url == null) {
+            String direct = String.valueOf(cmd).replaceAll(PREFIX, "").trim();
+            if (direct.startsWith("http") && !direct.contains("localhost")) url = direct;
+        }
+        if (url == null && "vod".equals(kind) && id != null && !id.isEmpty()) {
+            // Newer portals list a movie's video files separately; each file has its own cmd.
+            Object f = call(map("type", "vod", "action", "get_ordered_list", "movie_id", id,
+                    "season_id", "0", "episode_id", "0", "p", "1"), 30000);
+            JSONArray files = f instanceof JSONObject ? ((JSONObject) f).optJSONArray("data") : null;
+            if (files != null) {
+                for (int i = 0; i < files.length() && url == null; i++) {
+                    JSONObject file = files.optJSONObject(i);
+                    if (file == null || file.optString("cmd", "").isEmpty()) continue;
+                    last = createLink("vod", file.optString("cmd"), series);
+                    url = extract(last);
+                }
+            } else {
+                last = f;
+            }
+        }
+        if (url == null) {
+            throw new PortalException("The portal didn't return a playable link for this item. Portal replied: " + snippet(last));
+        }
         try { hosts.add(new URL(url).getAuthority()); } catch (IOException ignored) { }
         return url;
     }

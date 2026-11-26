@@ -294,7 +294,7 @@ function showEpisodes(v){
 }
 function playVod(v, ep){
   S.cur={kind:'vod', title:v.name+(ep?` · Episode ${ep}`:''), sub:[v.year, v.desc].filter(Boolean).join(' — ')};
-  openPlayer(); renderOSD(); startStream('vod',{cmd:v.cmd, series:ep||''});
+  openPlayer(); renderOSD(); startStream('vod',{cmd:v.cmd, series:ep||'', id:v.id});
 }
 
 /* ---------- Player ---------- */

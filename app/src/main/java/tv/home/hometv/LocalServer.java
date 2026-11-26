@@ -224,8 +224,8 @@ public class LocalServer {
             }
             if (p.equals("/api/play")) {
                 String url = "live".equals(str(r.q.get("kind")))
-                        ? portal.link("live", portal.cmdFor(str(r.q.get("id"))), "")
-                        : portal.link("vod", str(r.q.get("cmd")), str(r.q.get("series")));
+                        ? portal.link("live", portal.cmdFor(str(r.q.get("id"))), "", "")
+                        : portal.link("vod", str(r.q.get("cmd")), str(r.q.get("series")), str(r.q.get("id")));
                 json(out, 200, new JSONObject().put("type", streamType(url)).put("url", proxied(url)));
                 return;
             }
