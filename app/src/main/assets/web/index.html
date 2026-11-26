@@ -51,7 +51,6 @@ aside{width:16rem;flex:none;overflow-y:auto;padding:1rem .7rem;border-right:1px 
 #player{position:fixed;inset:0;background:#000;z-index:10}
 #video{width:100%;height:100%;background:#000;display:block}
 #osd{position:absolute;left:0;right:0;bottom:0;padding:3rem 3rem 2rem;background:linear-gradient(transparent,rgba(0,0,0,.88) 45%);transition:opacity .3s}
-#player.vod #osd{bottom:auto;top:0;padding:2rem 3rem 3rem;background:linear-gradient(rgba(0,0,0,.88) 55%,transparent)}
 #osd.hide{opacity:0;pointer-events:none}
 .osd-top{display:flex;align-items:baseline;gap:1rem;font-size:1.6rem;font-weight:700}
 #osd-num{color:var(--accent)}
@@ -62,6 +61,10 @@ aside{width:16rem;flex:none;overflow-y:auto;padding:1rem .7rem;border-right:1px 
 .osd-btns{display:flex;gap:.6rem;margin-top:1rem;flex-wrap:wrap}
 .osd-btns .btn{background:#ffffff1a;border-color:#ffffff22}
 #player.vod .live-only{display:none}
+#player:not(.vod) .vod-only{display:none}
+.vbar{display:flex;align-items:center;gap:1rem;margin-top:.8rem;font-variant-numeric:tabular-nums;color:#cfd6df;max-width:60rem}
+.vbar .prog{flex:1;max-width:none;margin:0;height:6px}
+#vstate{font-size:1.2rem;width:1.4rem;text-align:center}
 #spinner{position:absolute;top:50%;left:50%;width:3rem;height:3rem;margin:-1.5rem;border:4px solid #ffffff33;border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite;display:none}
 #player.loading #spinner{display:block}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -86,7 +89,7 @@ aside{width:16rem;flex:none;overflow-y:auto;padding:1rem .7rem;border-right:1px 
   #content{padding:1rem}
   #tip{display:none}
   #grid{grid-template-columns:repeat(auto-fill,minmax(8rem,1fr));gap:.6rem}
-  #osd,#player.vod #osd{padding:1.5rem 1.2rem}
+  #osd,
 }
 </style>
 </head>
@@ -112,6 +115,8 @@ aside{width:16rem;flex:none;overflow-y:auto;padding:1rem .7rem;border-right:1px 
   <div id="osd">
     <div class="osd-top"><span id="osd-num"></span><span id="osd-name"></span></div>
     <div id="osd-epg"></div>
+    <div class="vbar vod-only"><span id="vstate">▶</span><span id="vtime">0:00</span><div class="prog"><i id="vprog" style="width:0%"></i></div><span id="vdur">0:00</span></div>
+    <div class="hint vod-only">OK: play / pause · ◀ ▶: 10 s · ⏪ ⏩: 30 s</div>
     <div id="osd-msg"></div>
     <div class="osd-btns">
       <button class="btn pbtn" id="closeBtn">✕ Close</button>
@@ -393,7 +398,7 @@ function openPlayer(){
   const p=$('#player');
   if(p.hidden){ S.returnFocus=document.activeElement; p.hidden=false; }
   p.classList.toggle('vod', S.cur.kind==='vod');
-  video.controls = S.cur.kind==='vod';
+  video.controls = false;
   document.activeElement && document.activeElement.blur && document.activeElement.blur();
   showOSD();
 }
@@ -434,6 +439,18 @@ async function startStream(kind, params){
     if(p && p.catch) p.catch(err=>{ if(my===playToken && err && err.name==='NotAllowedError'){ S.needTap=true; $('#player').classList.remove('loading'); $('#osd-msg').textContent='Press OK (or tap) to start playback'; showOSD(true); } });
   }catch(e){ fail(e.message); }
 }
+const fmtDur=t=>{ if(!isFinite(t)||t<0) t=0; t=Math.floor(t); const h=Math.floor(t/3600), m=Math.floor(t%3600/60), sec=t%60; return (h?h+':'+String(m).padStart(2,'0'):m)+':'+String(sec).padStart(2,'0'); };
+function updVod(){
+  if($('#player').hidden || !S.cur || S.cur.kind!=='vod') return;
+  const d=video.duration, t=video.currentTime;
+  $('#vtime').textContent=fmtDur(t); $('#vdur').textContent=isFinite(d)?fmtDur(d):'--:--';
+  $('#vprog').style.width=(isFinite(d)&&d>0?Math.min(100,t/d*100):0)+'%';
+  $('#vstate').textContent=video.paused?'⏸':'▶';
+}
+setInterval(updVod,500);
+function seek(sec){ if(isFinite(video.duration)){ video.currentTime=Math.max(0,Math.min(video.duration-1,video.currentTime+sec)); updVod(); } }
+video.addEventListener('pause',()=>{ if(S.cur && S.cur.kind==='vod'){ updVod(); showOSD(true); } });
+video.addEventListener('play',()=>{ updVod(); showOSD(); });
 video.addEventListener('playing',()=>{ $('#player').classList.remove('loading'); $('#osd-msg').textContent=''; });
 video.addEventListener('waiting',()=>$('#player').classList.add('loading'));
 video.addEventListener('error',()=>{ if(!mp && !hls && video.getAttribute('src')) failMsg(); });
@@ -478,7 +495,7 @@ async function loadEPG(c){
 }
 function showOSD(stay){
   $('#osd').classList.remove('hide'); clearTimeout(osdT);
-  if(!stay) osdT=setTimeout(()=>{ if(!$('#osd-msg').textContent) $('#osd').classList.add('hide'); },5000);
+  if(!stay) osdT=setTimeout(()=>{ if(!$('#osd-msg').textContent && !(S.cur && S.cur.kind==='vod' && video.paused)) $('#osd').classList.add('hide'); },4000);
 }
 $('#closeBtn').onclick=closePlayer;
 $('#prevBtn').onclick=()=>zap(-1);
@@ -543,8 +560,14 @@ document.addEventListener('keydown',e=>{
       if(k==='ArrowUp'||k==='ChannelUp'||k==='PageUp'||e.keyCode===427){ e.preventDefault(); zap(-1); return; }
       if(k==='ArrowDown'||k==='ChannelDown'||k==='PageDown'||e.keyCode===428){ e.preventDefault(); zap(1); return; }
       if(k==='ArrowLeft'||k==='ArrowRight'){ e.preventDefault(); move(DIRS[k], $('#osd')); return; }
-    } else if(S.cur && (k==='ArrowLeft'||k==='ArrowRight') && !document.activeElement.classList.contains('pbtn')){
-      e.preventDefault(); if(isFinite(video.duration)) video.currentTime=Math.max(0,video.currentTime+(k==='ArrowLeft'?-10:10)); return;
+    } else if(S.cur && (k==='ArrowLeft'||k==='ArrowRight') && document.activeElement.classList.contains('pbtn')){
+      e.preventDefault(); move(DIRS[k], $('#osd')); return;
+    } else if(S.cur && (k==='ArrowLeft'||k==='ArrowRight')){
+      e.preventDefault(); seek(k==='ArrowLeft'?-10:10); return;
+    } else if(S.cur && (k==='MediaRewind'||k==='MediaFastForward'||e.keyCode===412||e.keyCode===417)){
+      e.preventDefault(); seek((k==='MediaRewind'||e.keyCode===412)?-30:30); return;
+    } else if(S.cur && (k==='ArrowUp'||k==='ArrowDown')){
+      e.preventDefault(); if(k==='ArrowDown') $('#closeBtn').focus(); else { document.activeElement.blur(); } return;
     }
     if((k==='Enter'||k===' ') && !document.activeElement.classList.contains('pbtn')){
       e.preventDefault(); if(S.needTap){ S.needTap=false; video.play(); } else if(S.cur && S.cur.kind==='vod'){ video.paused?video.play():video.pause(); }
