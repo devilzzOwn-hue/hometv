@@ -368,7 +368,7 @@ function playVod(v, ep, cmd){
 }
 
 /* ---------- Search: channels + movies + shows together ---------- */
-let searchToken=0;
+let searchToken=0, searchAbort=null;
 async function renderSearch(){
   const q=S.query, my=++searchToken; S.sub=null;
   if(S.tab==='live' && S.live) liveCats(); else if(S.tab==='vod') vodCats();
@@ -379,13 +379,18 @@ async function renderSearch(){
   const chSec=`<div class="section"><h3>Channels · ${chans.length}</h3><div class="sgrid">${chans.length?chans.slice(0,120).map(chCard).join(''):'<div class="empty small">No channels match.</div>'}</div></div>`;
   const vSec='<div class="section"><h3 id="vodHead">Movies &amp; Shows · searching…</h3><div class="sgrid posters" id="vodRes"></div></div>';
   $('#grid').innerHTML=chans.length?chSec+vSec:vSec+chSec;
+  if(q.length<3){ $('#vodHead').textContent='Movies & Shows'; $('#vodRes').innerHTML='<div class="empty small">Type at least 3 letters to search movies and shows.</div>'; return; }
+  if(searchAbort) searchAbort.abort();
+  const ctl=window.AbortController?new AbortController():null; searchAbort=ctl;
   try{
-    const d=await api('/api/search?q='+encodeURIComponent(q));
+    const d=await api('/api/search?q='+encodeURIComponent(q), ctl?{signal:ctl.signal}:undefined);
     if(my!==searchToken) return;
     $('#vodHead').textContent=`Movies & Shows · ${d.items.length}`;
-    $('#vodRes').innerHTML=d.items.length?d.items.map(vodCard).join(''):'<div class="empty small">No movies or shows match.</div>';
+    const src=d.sources||{}, part=(n,x)=>x?(x.ok?`${n}: ${x.count}`:`${n}: not available on this portal`):'';
+    const note=[part('Shows',src.series), part('Movies',src.movies)].filter(Boolean).join(' · ');
+    $('#vodRes').innerHTML=d.items.length?d.items.map(vodCard).join(''):`<div class="empty small">No movies or shows match.${note?'<br><small>Searched '+esc(note)+'</small>':''}<br><small>Tip: try one distinctive word, e.g. “crorepati”.</small></div>`;
   }catch(e){
-    if(my!==searchToken) return;
+    if(my!==searchToken || (e && e.name==='AbortError')) return;
     $('#vodHead').textContent='Movies & Shows';
     $('#vodRes').innerHTML=`<div class="empty small">${esc(e.message)}</div>`;
   }
@@ -610,7 +615,7 @@ function onSearch(){
   if(S.tab==='live'){ if(S.live) renderLive(); }
   else if(S.vod.cats){ S.vod.items.length||S.vod.cat==='fav' ? renderVodGrid() : loadVod(true); }
 }
-$('#q').addEventListener('input',()=>{ clearTimeout(qT); qT=setTimeout(onSearch, 400); });
+$('#q').addEventListener('input',()=>{ clearTimeout(qT); qT=setTimeout(onSearch, 700); });
 $('#cats').addEventListener('click',e=>{
   const b=e.target.closest('.cat'); if(!b) return;
   $('#q').value=''; S.query=''; S.sub=null; searchToken++;

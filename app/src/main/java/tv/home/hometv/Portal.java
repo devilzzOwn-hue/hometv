@@ -35,8 +35,8 @@ public class Portal {
     }
 
     private final Config cfg;
-    private String endpoint;
-    private String token;
+    private volatile String endpoint;
+    private volatile String token;
     private JSONObject live;
     private long liveAt;
     private final Map<String, String> cmdById = new HashMap<>();
@@ -213,10 +213,16 @@ public class Portal {
     }
 
     /** Calls the portal API, logging in again once if the token has expired. Returns the "js" payload. */
-    public synchronized Object call(Map<String, String> params, int timeoutMs) throws PortalException {
+    /** Calls the portal API, logging in again once if the token has expired. Returns the "js" payload.
+     *  Requests run in parallel; only logging in is serialized. */
+    public Object call(Map<String, String> params, int timeoutMs) throws PortalException {
         params.put("JsHttpRequest", "1-xml");
         for (int attempt = 1; ; attempt++) {
-            if (token == null) login();
+            String tok = token;
+            if (tok == null) {
+                synchronized (this) { if (token == null) login(); }
+                tok = token;
+            }
             try {
                 JSONObject d = get(endpoint, params, true, timeoutMs);
                 if (d.has("js")) {
@@ -226,7 +232,7 @@ public class Portal {
                 throw new PortalException("Portal reply had no data");
             } catch (PortalException e) {
                 if (attempt >= 2) throw e;
-                token = null;
+                synchronized (this) { if (token != null && token.equals(tok)) token = null; }
             }
         }
     }
@@ -397,30 +403,74 @@ public class Portal {
         return list("vod", category, page, search);
     }
 
-    /** Searches movies and series (both the VOD module and, where the portal has one, the Series module). */
-    public JSONObject search(String q) throws PortalException {
-        JSONArray all = new JSONArray();
-        Set<String> seen = new HashSet<>();
-        PortalException first = null;
-        for (String module : new String[]{"vod", "series"}) {
-            for (int page = 1; page <= 3; page++) {
-                JSONObject r;
-                try { r = list(module, "*", page, q); }
-                catch (PortalException e) { if (first == null && "vod".equals(module)) first = e; break; }
-                JSONArray items = r.optJSONArray("items");
-                if (items == null || items.length() == 0) break;
-                for (int i = 0; i < items.length(); i++) {
-                    JSONObject it = items.optJSONObject(i);
-                    if (it == null) continue;
-                    String key = module + ":" + it.optString("id");
-                    if (seen.add(key)) all.put(it);
-                }
+    private final Map<String, Object[]> searchCache = new HashMap<>();
+    private final java.util.concurrent.ExecutorService searchPool = java.util.concurrent.Executors.newFixedThreadPool(4);
+
+    private JSONObject searchModule(String module, String q) {
+        JSONObject res = new JSONObject();
+        JSONArray items = new JSONArray();
+        try {
+            for (int page = 1; page <= 2; page++) {
+                JSONObject r = list(module, "*", page, q);
+                JSONArray it = r.optJSONArray("items");
+                if (it == null || it.length() == 0) break;
+                for (int i = 0; i < it.length(); i++) items.put(it.opt(i));
                 if (page >= r.optInt("pages", 1)) break;
             }
+            res.put("ok", true);
+        } catch (Exception e) {
+            try { res.put("ok", false).put("error", String.valueOf(e.getMessage())); } catch (JSONException ignored) { }
         }
-        if (all.length() == 0 && first != null) throw first;
-        try { return new JSONObject().put("items", all); }
-        catch (JSONException e) { throw new PortalException(e.getMessage()); }
+        try { res.put("items", items); } catch (JSONException ignored) { }
+        return res;
+    }
+
+    /** Searches movies (VOD) and series at the same time; results are cached for 10 minutes. */
+    public JSONObject search(String q) throws PortalException {
+        final String key = q.toLowerCase(Locale.US).trim();
+        synchronized (searchCache) {
+            Object[] hit = searchCache.get(key);
+            if (hit != null && System.currentTimeMillis() - (Long) hit[0] < 10 * 60 * 1000L) return (JSONObject) hit[1];
+        }
+        java.util.concurrent.Future<JSONObject> vodF = searchPool.submit(new java.util.concurrent.Callable<JSONObject>() {
+            @Override public JSONObject call() { return searchModule("vod", q); }
+        });
+        java.util.concurrent.Future<JSONObject> serF = searchPool.submit(new java.util.concurrent.Callable<JSONObject>() {
+            @Override public JSONObject call() { return searchModule("series", q); }
+        });
+        JSONObject vod, ser;
+        try {
+            vod = vodF.get(45, java.util.concurrent.TimeUnit.SECONDS);
+            ser = serF.get(45, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (Exception e) {
+            throw new PortalException("Search timed out");
+        }
+        try {
+            JSONArray all = new JSONArray();
+            Set<String> seen = new HashSet<>();
+            for (JSONObject src : new JSONObject[]{ser, vod}) {   // shows first, then movies
+                JSONArray it = src.optJSONArray("items");
+                if (it == null) continue;
+                for (int i = 0; i < it.length(); i++) {
+                    JSONObject o = it.optJSONObject(i);
+                    if (o != null && seen.add(o.optString("kind") + ":" + o.optString("id"))) all.put(o);
+                }
+            }
+            if (all.length() == 0 && !vod.optBoolean("ok") && !ser.optBoolean("ok")) {
+                throw new PortalException(vod.optString("error", "Search failed"));
+            }
+            JSONObject sources = new JSONObject()
+                    .put("movies", new JSONObject().put("ok", vod.optBoolean("ok")).put("count", vod.optJSONArray("items").length()).put("error", vod.optString("error", "")))
+                    .put("series", new JSONObject().put("ok", ser.optBoolean("ok")).put("count", ser.optJSONArray("items").length()).put("error", ser.optString("error", "")));
+            JSONObject out = new JSONObject().put("items", all).put("sources", sources);
+            synchronized (searchCache) {
+                if (searchCache.size() > 50) searchCache.clear();
+                searchCache.put(key, new Object[]{System.currentTimeMillis(), out});
+            }
+            return out;
+        } catch (JSONException e) {
+            throw new PortalException(e.getMessage());
+        }
     }
 
     /** Seasons of a series; each season has its own cmd and a list of episode numbers. */
