@@ -19,14 +19,15 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - uses: android-actions/setup-android@v3
-
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
 
-      - name: Build the APK
-        run: gradle assembleRelease --no-daemon --stacktrace
+      - name: Build the APK (uses the Android SDK preinstalled on GitHub's runner)
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          gradle assembleRelease --no-daemon --stacktrace
 
       - name: Rename
         run: cp app/build/outputs/apk/release/app-release.apk HomeTV.apk
