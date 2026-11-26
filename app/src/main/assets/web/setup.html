@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Home TV · Settings</title>
+<style>
+:root{--bg:#0c1016;--panel:#121821;--card:#19212c;--card2:#222c3a;--line:#243041;--text:#e9eef4;--muted:#8a96a8;--accent:#f5a524;--focus:#ffd27a;--ok:#7ad58a;--bad:#ff9b8f}
+*{box-sizing:border-box}
+html{font-size:clamp(15px,1.05vw,22px)}
+body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+.wrap{max-width:46rem;margin:0 auto;padding:2rem 1.4rem 4rem}
+.brand{font-weight:800;font-size:1.5rem;letter-spacing:-.02em}.brand span{color:var(--accent)}
+h1{font-size:1.25rem;margin:.6rem 0 .3rem}
+p.lead{color:var(--muted);margin:0 0 1.4rem;line-height:1.5}
+.phone{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:.8rem;padding:1rem 1.2rem;margin-bottom:1.6rem;line-height:1.5}
+.phone b{color:var(--accent);font-size:1.15rem;word-break:break-all}
+label{display:block;margin:1rem 0 .35rem;font-weight:600}
+label small{font-weight:400;color:var(--muted)}
+input,select{width:100%;font:inherit;padding:.7rem .9rem;border-radius:.7rem;border:2px solid var(--line);background:var(--panel);color:var(--text)}
+input:focus,select:focus{outline:none;border-color:var(--focus)}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:0 1rem}
+.check{display:flex;align-items:center;gap:.7rem;margin-top:1.2rem;font-weight:400}
+.check input{width:1.3rem;height:1.3rem}
+.btns{display:flex;gap:.8rem;margin-top:1.8rem;flex-wrap:wrap}
+button{font:inherit;color:var(--text);background:var(--card2);border:1px solid var(--line);padding:.75rem 1.4rem;border-radius:.7rem;cursor:pointer}
+button.primary{background:var(--accent);color:#1a1205;border-color:var(--accent);font-weight:700}
+button:focus{outline:3px solid var(--focus);outline-offset:2px}
+#status{margin-top:1.2rem;line-height:1.5;white-space:pre-wrap}
+#status.ok{color:var(--ok)}#status.bad{color:var(--bad)}
+@media (max-width:600px){.row{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand">Home<span>TV</span></div>
+  <h1>Settings</h1>
+  <p class="lead">Enter the same details you use in StbEmu (Profiles → Portal settings and STB configuration).</p>
+
+  <div class="phone" id="phoneHint" hidden>
+    Typing with the remote is slow. On your phone (same Wi-Fi), open<br><b id="setupUrl"></b><br>
+    and fill this in there. Then press <i>Continue</i> here.
+  </div>
+
+  <form id="f" autocomplete="off">
+    <label>Portal URL</label>
+    <input name="portal_url" class="nav" placeholder="https://your-portal.example" inputmode="url">
+    <div class="row">
+      <div><label>MAC address</label><input name="mac" class="nav" placeholder="00:1A:79:XX:XX:XX"></div>
+      <div><label>STB model</label>
+        <select name="model" class="nav">
+          <option>MAG424</option><option>MAG424w3</option><option>MAG420</option><option>MAG349</option>
+          <option>MAG351</option><option>MAG352</option><option>MAG250</option><option>MAG254</option>
+          <option>MAG256</option><option>MAG322</option><option>MAG520</option><option>MAG524</option>
+        </select></div>
+    </div>
+    <label>Serial number <small>(optional)</small></label>
+    <input name="serial" class="nav">
+    <label>Device ID <small>(optional, from STB configuration → Device ID)</small></label>
+    <input name="device_id" class="nav">
+    <label>Device ID 2 <small>(optional, usually blank)</small></label>
+    <input name="device_id2" class="nav">
+    <label>Time zone</label>
+    <input name="timezone" class="nav" placeholder="America/Los_Angeles">
+    <label class="check"><input type="checkbox" name="single_stream" class="nav" checked> Only one stream at a time (protects a 1-screen plan)</label>
+    <div class="btns">
+      <button type="submit" class="primary nav" id="save">Save &amp; connect</button>
+      <button type="button" class="nav" id="cont">Continue</button>
+    </div>
+  </form>
+  <div id="status"></div>
+</div>
+<script>
+"use strict";
+const $=s=>document.querySelector(s), f=$('#f');
+const isTV=['127.0.0.1','localhost'].includes(location.hostname);
+function status(msg,cls){ const s=$('#status'); s.textContent=msg; s.className=cls||''; }
+async function load(){
+  try{
+    const r=await fetch('/api/config'); const c=await r.json();
+    for(const el of f.elements){ if(!el.name) continue; if(el.type==='checkbox') el.checked=!!c[el.name]; else if(c[el.name]) el.value=c[el.name]; }
+    if(isTV && c.setup_url){ $('#setupUrl').textContent=c.setup_url; $('#phoneHint').hidden=false; }
+    $('#cont').hidden=!isTV || !c.configured;
+    return c;
+  }catch(e){ status('Could not read settings: '+e.message,'bad'); }
+}
+f.addEventListener('submit',async e=>{
+  e.preventDefault();
+  const data={}; for(const el of f.elements){ if(!el.name) continue; data[el.name]= el.type==='checkbox'?el.checked:el.value.trim(); }
+  if(!data.portal_url||!data.mac){ status('Portal URL and MAC address are required.','bad'); return; }
+  status('Connecting to the portal…');
+  try{
+    const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+    const d=await r.json();
+    if(d.ok){ status(`Connected. ${d.channels} channels found.`+(isTV?'':' You can go back to the TV now and press Continue.'),'ok'); $('#cont').hidden=!isTV; if(isTV) $('#cont').focus(); }
+    else status('Saved, but could not connect:\n'+(d.error||'unknown error'),'bad');
+  }catch(e){ status('Saving failed: '+e.message,'bad'); }
+});
+$('#cont').onclick=()=>location.replace('/');
+// Remote control: Up/Down moves between fields.
+document.addEventListener('keydown',e=>{
+  if(e.key!=='ArrowUp'&&e.key!=='ArrowDown') return;
+  if(document.activeElement.tagName==='SELECT') return;
+  const list=[...document.querySelectorAll('.nav')].filter(x=>x.offsetParent!==null);
+  const i=list.indexOf(document.activeElement);
+  const n=list[Math.max(0,Math.min(list.length-1,(i<0?0:i+(e.key==='ArrowDown'?1:-1))))];
+  if(n){ e.preventDefault(); n.focus(); n.scrollIntoView({block:'center'}); }
+});
+// When filled in from a phone, notice it here on the TV.
+let wasConfigured=null;
+load().then(c=>{
+  wasConfigured=c&&c.configured;
+  const first=f.elements[0]; if(first) first.focus();
+  if(isTV) setInterval(async()=>{ try{ const c=await (await fetch('/api/config')).json(); if(c.configured && !wasConfigured){ wasConfigured=true; await load(); status('Settings received from your phone. Press Continue.','ok'); $('#cont').focus(); } }catch(e){} },3000);
+});
+</script>
+</body>
+</html>

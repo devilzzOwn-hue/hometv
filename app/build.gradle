@@ -1,0 +1,37 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'tv.home.hometv'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'tv.home.hometv'
+        minSdk 22          // Fire OS 5 and newer
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+
+    signingConfigs {
+        release {
+            storeFile rootProject.file('keystore/hometv.jks')
+            storePassword 'hometv-store'
+            keyAlias 'hometv'
+            keyPassword 'hometv-store'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}
