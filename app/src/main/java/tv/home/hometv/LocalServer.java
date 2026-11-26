@@ -206,13 +206,19 @@ public class LocalServer {
     // ------------------------------------------------------------------ routes
     private void route(Req r, OutputStream out) throws IOException {
         String p = r.path;
-        boolean lanAllowed = p.equals("/setup") || p.equals("/api/config");
+        boolean lanAllowed = p.equals("/setup") || p.equals("/api/config") || p.equals("/debug");
         if (!r.local && !lanAllowed) { error(out, 403, "Only the Setup page is available from other devices"); return; }
         try {
             if (p.equals("/") || p.equals("/index.html")) { asset(out, "index.html"); return; }
             if (p.equals("/setup")) { asset(out, "setup.html"); return; }
             if (p.startsWith("/static/")) { asset(out, p.substring("/static/".length())); return; }
             if (p.equals("/api/config")) { config(r, out); return; }
+            if (p.equals("/debug")) {
+                String body = "Home TV diagnostics: last portal requests (newest at the bottom)\n"
+                        + "Portal: " + cfg.get("portal_url") + "   Model: " + cfg.get("model") + "\n\n" + portal.debugLog();
+                send(out, 200, "text/plain; charset=utf-8", body.getBytes("UTF-8"));
+                return;
+            }
             if (p.equals("/api/live")) { json(out, 200, portal.liveListing("1".equals(r.q.get("refresh")))); return; }
             if (p.equals("/api/epg")) { json(out, 200, new JSONObject().put("programs", portal.epg(str(r.q.get("id"))))); return; }
             if (p.equals("/api/vod/categories")) { json(out, 200, new JSONObject().put("categories", portal.vodCategories())); return; }

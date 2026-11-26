@@ -45,6 +45,23 @@ public class Portal {
 
     public Portal(Config cfg) { this.cfg = cfg; }
 
+    /** Recent portal requests and replies, shown on the /debug page (MAC address never included). */
+    private final java.util.LinkedList<String> log = new java.util.LinkedList<>();
+    private static final String[] LOG_KEYS = {"type", "action", "cmd", "series", "movie_id", "season_id", "category", "search", "ch_id", "p"};
+
+    private void addLog(String line) {
+        synchronized (log) {
+            log.addLast(new java.text.SimpleDateFormat("HH:mm:ss", Locale.US).format(new java.util.Date()) + "  " + line);
+            while (log.size() > 60) log.removeFirst();
+        }
+    }
+
+    public String debugLog() {
+        StringBuilder sb = new StringBuilder();
+        synchronized (log) { for (String l : log) sb.append(l).append("\n\n"); }
+        return sb.toString();
+    }
+
     public synchronized void reset() {
         endpoint = null; token = null; live = null; liveAt = 0; cmdById.clear();
     }
@@ -114,9 +131,18 @@ public class Portal {
             c.setRequestProperty("Accept", "*/*");
             c.setRequestProperty("Cookie", "mac=" + enc(mac()) + "; stb_lang=en; timezone=" + enc(cfg.get("timezone")));
             if (auth && token != null) c.setRequestProperty("Authorization", "Bearer " + token);
+            StringBuilder req = new StringBuilder("-> ");
+            for (String k : LOG_KEYS) if (params.containsKey(k)) req.append(k).append('=').append(params.get(k)).append("  ");
+            addLog(req.toString().trim());
             int code = c.getResponseCode();
-            if (code >= 400) throw new PortalException("HTTP " + code + " from " + url);
+            if (code >= 400) { addLog("<- HTTP " + code); throw new PortalException("HTTP " + code + " from " + url); }
             String raw = readAll(c.getInputStream());
+            String action = params.get("action");
+            if (!"get_all_channels".equals(action) && !"get_genres".equals(action) && !"get_categories".equals(action)) {
+                addLog("<- " + (raw.length() > 600 ? raw.substring(0, 600) + "..." : raw));
+            } else {
+                addLog("<- (" + raw.length() + " bytes)");
+            }
             Object v;
             try { v = new JSONTokener(raw).nextValue(); }
             catch (JSONException e) { v = null; }
@@ -438,32 +464,50 @@ public class Portal {
     }
 
     public String link(String kind, String cmd, String series, String id) throws PortalException {
-        Object js = createLink(kind, cmd, series);
-        String url = extract(js);
-        Object last = js;
-        if (url == null) {
-            String direct = String.valueOf(cmd).replaceAll(PREFIX, "").trim();
-            if (direct.startsWith("http") && !direct.contains("localhost")) url = direct;
+        Object last = null;
+        List<String> tried = new ArrayList<>();
+        LinkedHashSet<String> cmds = new LinkedHashSet<>();
+        if (cmd != null && !cmd.trim().isEmpty()) cmds.add(cmd);
+        boolean vod = !"live".equals(kind);
+        if (vod && id != null && !id.isEmpty()) cmds.add("/media/" + id + ".mpg");
+
+        for (String c : cmds) {
+            last = createLink(kind, c, series);
+            tried.add(c);
+            String url = extract(last);
+            if (url != null) return remember(url);
         }
-        if (url == null && "vod".equals(kind) && id != null && !id.isEmpty()) {
+        if (!vod) {
+            String direct = String.valueOf(cmd).replaceAll(PREFIX, "").trim();
+            if (direct.startsWith("http") && !direct.contains("localhost")) return remember(direct);
+        }
+        if (vod && id != null && !id.isEmpty()) {
             // Newer portals list a movie's video files separately; each file has its own cmd.
             Object f = call(map("type", "vod", "action", "get_ordered_list", "movie_id", id,
                     "season_id", "0", "episode_id", "0", "p", "1"), 30000);
             JSONArray files = f instanceof JSONObject ? ((JSONObject) f).optJSONArray("data") : null;
             if (files != null) {
-                for (int i = 0; i < files.length() && url == null; i++) {
+                for (int i = 0; i < files.length() && i < 4; i++) {
                     JSONObject file = files.optJSONObject(i);
-                    if (file == null || file.optString("cmd", "").isEmpty()) continue;
-                    last = createLink("vod", file.optString("cmd"), series);
-                    url = extract(last);
+                    if (file == null) continue;
+                    LinkedHashSet<String> fc = new LinkedHashSet<>();
+                    if (!file.optString("cmd", "").isEmpty()) fc.add(file.optString("cmd"));
+                    if (!file.optString("id", "").isEmpty()) fc.add("/media/file_" + file.optString("id") + ".mpg");
+                    for (String c : fc) {
+                        if (tried.contains(c)) continue;
+                        last = createLink("vod", c, series);
+                        tried.add(c);
+                        String url = extract(last);
+                        if (url != null) return remember(url);
+                    }
                 }
-            } else {
-                last = f;
             }
         }
-        if (url == null) {
-            throw new PortalException("The portal didn't return a playable link for this item. Portal replied: " + snippet(last));
-        }
+        throw new PortalException("The portal didn't return a playable link for this item. Tried: " + tried
+                + ". Last reply: " + snippet(last) + ". Details: open /debug on your phone.");
+    }
+
+    private String remember(String url) {
         try { hosts.add(new URL(url).getAuthority()); } catch (IOException ignored) { }
         return url;
     }
