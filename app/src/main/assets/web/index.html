@@ -67,6 +67,15 @@ aside{width:16rem;flex:none;overflow-y:auto;padding:1rem .7rem;border-right:1px 
 @keyframes spin{to{transform:rotate(360deg)}}
 #toast{position:fixed;left:50%;bottom:2rem;transform:translate(-50%,1rem);background:var(--card2);border:1px solid var(--line);padding:.7rem 1.2rem;border-radius:.7rem;opacity:0;transition:.25s;z-index:20;pointer-events:none}
 #toast.show{opacity:1;transform:translate(-50%,0)}
+.headrow{display:flex;align-items:baseline;justify-content:space-between;gap:1rem;margin-bottom:1rem}
+.headrow #heading{margin-bottom:0}
+#tip{color:var(--muted);font-size:.8rem;white-space:nowrap}#tip b{color:var(--text)}
+#grid.search{display:block}
+.section{margin-bottom:1.8rem}
+.section h3{font-size:1rem;color:var(--muted);font-weight:600;margin:0 0 .8rem}
+.sgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(10.5rem,1fr));gap:.9rem}
+.sgrid.posters{grid-template-columns:repeat(auto-fill,minmax(9rem,1fr))}
+.empty.small{padding:.5rem 0;text-align:left}
 @media (max-width:760px){
   header{flex-wrap:wrap;gap:.6rem;padding:.7rem .9rem}
   .search{order:3;flex-basis:100%;max-width:none}
@@ -75,6 +84,7 @@ aside{width:16rem;flex:none;overflow-y:auto;padding:1rem .7rem;border-right:1px 
   aside{width:auto;display:flex;gap:.4rem;overflow-x:auto;overflow-y:hidden;border-right:0;border-bottom:1px solid var(--line);padding:.6rem .8rem;flex:none}
   .cat{white-space:nowrap;width:auto}.cat-sep{display:none}
   #content{padding:1rem}
+  #tip{display:none}
   #grid{grid-template-columns:repeat(auto-fill,minmax(8rem,1fr));gap:.6rem}
   #osd,#player.vod #osd{padding:1.5rem 1.2rem}
 }
@@ -87,13 +97,13 @@ aside{width:16rem;flex:none;overflow-y:auto;padding:1rem .7rem;border-right:1px 
     <button class="tab active focusable" data-tab="live">Live TV</button>
     <button class="tab focusable" data-tab="vod">Movies &amp; Shows</button>
   </nav>
-  <div class="search"><input id="q" class="focusable" placeholder="Search channels…" autocomplete="off" spellcheck="false"></div>
+  <div class="search"><input id="q" class="focusable" placeholder="Search channels, movies & shows…" autocomplete="off" spellcheck="false"></div>
   <div id="clock"></div>
   <button class="tab focusable" id="setBtn" hidden>⚙ Settings</button>
 </header>
 <main>
   <aside id="cats"></aside>
-  <section id="content"><div id="heading"></div><div id="grid"></div><div id="more"></div></section>
+  <section id="content"><div class="headrow"><div id="heading"></div><div id="tip">Hold <b>OK</b> or press <b>☰</b> on a tile to add it to Favourites</div></div><div id="grid"></div><div id="more"></div></section>
 </main>
 
 <div id="player" hidden>
@@ -107,7 +117,7 @@ aside{width:16rem;flex:none;overflow-y:auto;padding:1rem .7rem;border-right:1px 
       <button class="btn pbtn" id="closeBtn">✕ Close</button>
       <button class="btn pbtn live-only" id="prevBtn">▲ Previous</button>
       <button class="btn pbtn live-only" id="nextBtn">▼ Next</button>
-      <button class="btn pbtn live-only" id="favBtn">☆ Favourite</button>
+      <button class="btn pbtn" id="favBtn">☆ Favourite</button>
     </div>
   </div>
 </div>
@@ -135,9 +145,9 @@ window.logoFail = img => { const d=document.createElement('div'); d.className='i
 
 const S = {
   tab:'live', live:null, byId:new Map(), cat:'all', query:'', list:[], shown:0,
-  prefs:{favorites:[], recent:[]},
+  prefs:{favorites:[], recent:[], vod_favorites:[]},
   vod:{cats:null, cat:'*', page:1, pages:1, total:0, items:[], series:null},
-  cur:null, needTap:false
+  cur:null, needTap:false, sub:null, vodById:new Map()
 };
 
 /* ---------- favourites & recents (stored on the server, shared by every TV) ---------- */
@@ -237,26 +247,52 @@ function moreLive(){
 
 /* ---------- Movies & Shows ---------- */
 let vodToken=0;
+const vkey=v=>(v.kind||'vod')+':'+v.id;
+const isVodFav=v=>S.prefs.vod_favorites.some(x=>vkey(x)===vkey(v));
+function toggleVodFav(v){
+  if(!v) return;
+  const L=S.prefs.vod_favorites, i=L.findIndex(x=>vkey(x)===vkey(v));
+  if(i>=0){ L.splice(i,1); toast('Removed from favourites'); }
+  else { L.unshift({id:v.id, kind:v.kind||'vod', is_series:!!v.is_series, name:v.name, year:v.year, rating:v.rating, poster:v.poster, cmd:v.cmd, series:v.series||[], desc:String(v.desc||'').slice(0,400)}); toast('Added to favourites'); }
+  savePrefs();
+  document.querySelectorAll(`.card[data-vk="${CSS.escape(vkey(v))}"]`).forEach(c=>{
+    const st=c.querySelector('.star'), f=isVodFav(v);
+    if(f&&!st) c.insertAdjacentHTML('beforeend','<span class="star">★</span>'); if(!f&&st) st.remove();
+  });
+  if(S.tab==='vod' && !S.query && !S.sub){ vodCats(); if(S.vod.cat==='fav') renderVodFavs(); }
+}
 async function initVod(){
   setHeading('Loading…'); $('#grid').innerHTML=''; $('#more').innerHTML='';
   try{ S.vod.cats=(await api('/api/vod/categories')).categories; }
   catch(e){ return showError(e.message, initVod); }
+  if(S.prefs.vod_favorites.length && S.vod.cat==='*' && !S.vod.visited) S.vod.cat='fav';
+  S.vod.visited=true;
   loadVod(true);
 }
 function vodCats(){
-  const items=[['*','All'],...(S.vod.cats||[]).filter(c=>c.id!=='*').map(c=>[c.id,c.title])];
-  $('#cats').innerHTML=items.map(([id,t])=>`<button class="cat focusable${S.vod.cat===id&&!S.query?' active':''}" data-cat="${esc(id)}"><span>${esc(t)}</span></button>`).join('');
+  const items=[['fav','★ Favourites',S.prefs.vod_favorites.length],['*','All',''],...(S.vod.cats||[]).filter(c=>c.id!=='*').map(c=>[c.id,c.title,''])];
+  $('#cats').innerHTML=items.map(([id,t,n],i)=>`<button class="cat focusable${S.vod.cat===id&&!S.query?' active':''}" data-cat="${esc(id)}"><span>${esc(t)}</span><span class="n">${n}</span></button>`+(i===0?'<div class="cat-sep"></div>':'')).join('');
 }
-function vodCard(v,i){
-  const meta=[v.year, v.rating&&('★ '+v.rating), v.series.length&&'Series'].filter(Boolean).join(' · ');
-  return `<button class="card poster focusable" data-idx="${i}">${v.poster?`<img class="img" src="${esc(v.poster)}" alt="" loading="lazy" onerror="this.removeAttribute('src')">`:'<div class="img"></div>'}<div class="name">${esc(v.name)}</div><div class="num">${esc(meta)}</div></button>`;
+function vodCard(v){
+  S.vodById.set(vkey(v),v);
+  const meta=[v.year, v.rating&&('★ '+v.rating), (v.is_series||(v.series&&v.series.length))&&'Series'].filter(Boolean).join(' · ');
+  return `<button class="card poster focusable" data-vk="${esc(vkey(v))}">${v.poster?`<img class="img" src="${esc(v.poster)}" alt="" loading="lazy" onerror="this.removeAttribute('src')">`:'<div class="img"></div>'}<div class="name">${esc(v.name)}</div><div class="num">${esc(meta)}</div>${isVodFav(v)?'<span class="star">★</span>':''}</button>`;
 }
 function vodHeading(){
   const V=S.vod, c=(V.cats||[]).find(c=>c.id===V.cat);
-  setHeading(S.query?`${V.total} result${V.total===1?'':'s'} for <b>“${esc(S.query)}”</b>`:`<b>${esc(c?c.title:'All')}</b> · ${V.total} title${V.total===1?'':'s'}`);
+  setHeading(`<b>${esc(c?c.title:'All')}</b> · ${V.total} title${V.total===1?'':'s'}`);
+}
+function renderVodFavs(){
+  S.sub=null; vodCats();
+  const L=S.prefs.vod_favorites;
+  setHeading(`<b>Favourites</b> · ${L.length} title${L.length===1?'':'s'}`);
+  $('#grid').className='posters'; $('#more').innerHTML='';
+  $('#grid').innerHTML=L.length?L.map(vodCard).join(''):'<div class="empty">No favourite movies or shows yet.<br>Hold <b>OK</b> (or press <b>☰</b>) on any poster to add it.</div>';
 }
 function renderVodGrid(){
-  const V=S.vod; V.series=null; vodHeading();
+  const V=S.vod; S.sub=null;
+  if(V.cat==='fav') return renderVodFavs();
+  vodCats(); vodHeading();
   $('#grid').className='posters';
   $('#grid').innerHTML=V.items.length?V.items.map(vodCard).join(''):'<div class="empty">Nothing found.</div>';
   vodMoreBtn();
@@ -267,34 +303,87 @@ function vodMoreBtn(){
   const b=$('#moreBtn'); if(b) b.onclick=()=>{ V.page++; loadVod(false); };
 }
 async function loadVod(reset){
-  const V=S.vod;
-  if(reset){ V.page=1; V.items=[]; V.series=null; $('#grid').className='posters'; $('#grid').innerHTML=''; $('#more').innerHTML=''; $('#content').scrollTop=0;
-    setHeading(S.query?`Searching for <b>“${esc(S.query)}”</b>…`:'Loading…'); }
+  const V=S.vod; S.sub=null;
+  if(V.cat==='fav'){ renderVodFavs(); return; }
+  if(reset){ V.page=1; V.items=[]; $('#grid').className='posters'; $('#grid').innerHTML=''; $('#more').innerHTML=''; $('#content').scrollTop=0; setHeading('Loading…'); }
   vodCats();
   const my=++vodToken;
   try{
-    const d=await api('/api/vod/list?'+new URLSearchParams({category:S.query?'*':V.cat, page:V.page, search:S.query}));
-    if(my!==vodToken || S.tab!=='vod') return;
+    const d=await api('/api/vod/list?'+new URLSearchParams({category:V.cat, page:V.page, search:''}));
+    if(my!==vodToken || S.tab!=='vod' || S.query) return;
     const start=V.items.length;
     V.items.push(...d.items); V.pages=d.pages; V.total=d.total;
     vodHeading();
     if(!V.items.length) $('#grid').innerHTML='<div class="empty">Nothing found.</div>';
-    else $('#grid').insertAdjacentHTML('beforeend',d.items.map((v,i)=>vodCard(v,start+i)).join(''));
+    else $('#grid').insertAdjacentHTML('beforeend',d.items.map(vodCard).join(''));
     vodMoreBtn();
-    if(!reset) focusFirst(`#grid .card[data-idx="${start}"]`);
+    if(!reset){ const cards=$('#grid').querySelectorAll('.card'); if(cards[start]) cards[start].focus(); }
   }catch(e){ if(my===vodToken && S.tab==='vod') showError(e.message, ()=>loadVod(true)); }
 }
-function showEpisodes(v){
-  S.vod.series=v;
-  setHeading(`<b>${esc(v.name)}</b> · ${v.series.length} episodes`);
-  $('#grid').className='';
-  $('#grid').innerHTML='<button class="card focusable ep" data-back="1">← Back</button>'+v.series.map(n=>`<button class="card focusable ep" data-ep="${esc(n)}">Episode ${esc(n)}</button>`).join('');
-  $('#more').innerHTML=''; $('#content').scrollTop=0;
+/* Series: seasons -> episodes. S.sub holds the sub-view and how to go back. */
+function restoreView(){
+  S.sub=null;
+  if(S.query) renderSearch(); else if(S.tab==='live') renderLive(); else renderVodGrid();
+  focusFirst('#grid .card');
+}
+function openVod(v){
+  if(!v) return;
+  if(v.series && v.series.length) return showEpisodes(v, v.cmd, v.series, v.name, restoreView);
+  if(v.is_series) return showSeasons(v);
+  playVod(v,'',v.cmd);
+}
+async function showSeasons(v){
+  S.sub={v, back:restoreView};
+  setHeading(`<b>${esc(v.name)}</b> · loading seasons…`); $('#grid').className=''; $('#grid').innerHTML=''; $('#more').innerHTML='';
+  let seasons=[];
+  try{ seasons=(await api('/api/seasons?'+new URLSearchParams({id:v.id, module:v.kind||'vod'}))).seasons||[]; }
+  catch(e){ $('#grid').innerHTML=`<button class="card focusable ep" data-back="1">← Back</button><div class="empty">${esc(e.message)}</div>`; focusFirst('#grid .card'); return; }
+  if(!S.sub || S.sub.v!==v) return;
+  if(!seasons.length){ $('#grid').innerHTML='<button class="card focusable ep" data-back="1">← Back</button><div class="empty">No episodes found for this show.</div>'; focusFirst('#grid .card'); return; }
+  if(seasons.length===1) return showEpisodes(v, seasons[0].cmd, seasons[0].series, v.name, restoreView);
+  const render=()=>{
+    S.sub={v, seasons, back:restoreView};
+    setHeading(`<b>${esc(v.name)}</b> · ${seasons.length} seasons`);
+    $('#grid').className=''; $('#more').innerHTML=''; $('#content').scrollTop=0;
+    $('#grid').innerHTML='<button class="card focusable ep" data-back="1">← Back</button>'+seasons.map((se,i)=>`<button class="card focusable ep" data-season="${i}">${esc(se.name||('Season '+(i+1)))}<div class="num">${se.series.length} episodes</div></button>`).join('');
+    focusFirst('#grid .card[data-season]');
+  };
+  S.renderSeasons=render; render();
+}
+function showEpisodes(v, cmd, eps, title, back){
+  S.sub={v, cmd, back};
+  setHeading(`<b>${esc(title)}</b> · ${eps.length} episodes`);
+  $('#grid').className=''; $('#more').innerHTML=''; $('#content').scrollTop=0;
+  $('#grid').innerHTML='<button class="card focusable ep" data-back="1">← Back</button>'+eps.map(n=>`<button class="card focusable ep" data-ep="${esc(n)}">Episode ${esc(n)}</button>`).join('');
   focusFirst('#grid .card[data-ep]');
 }
-function playVod(v, ep){
-  S.cur={kind:'vod', title:v.name+(ep?` · Episode ${ep}`:''), sub:[v.year, v.desc].filter(Boolean).join(' — ')};
-  openPlayer(); renderOSD(); startStream('vod',{cmd:v.cmd, series:ep||'', id:v.id});
+function playVod(v, ep, cmd){
+  S.cur={kind:'vod', v, title:v.name+(ep?` · Episode ${ep}`:''), sub:[v.year, v.desc].filter(Boolean).join(' — ')};
+  openPlayer(); renderOSD(); startStream('vod',{cmd:cmd||v.cmd, series:ep||'', id:v.id});
+}
+
+/* ---------- Search: channels + movies + shows together ---------- */
+let searchToken=0;
+async function renderSearch(){
+  const q=S.query, my=++searchToken; S.sub=null;
+  if(S.tab==='live' && S.live) liveCats(); else if(S.tab==='vod') vodCats();
+  const chans=S.live?searchChannels(q):[];
+  S.list=chans;
+  $('#grid').className='search'; $('#more').innerHTML=''; $('#content').scrollTop=0;
+  setHeading(`Results for <b>“${esc(q)}”</b>`);
+  const chSec=`<div class="section"><h3>Channels · ${chans.length}</h3><div class="sgrid">${chans.length?chans.slice(0,120).map(chCard).join(''):'<div class="empty small">No channels match.</div>'}</div></div>`;
+  const vSec='<div class="section"><h3 id="vodHead">Movies &amp; Shows · searching…</h3><div class="sgrid posters" id="vodRes"></div></div>';
+  $('#grid').innerHTML=chans.length?chSec+vSec:vSec+chSec;
+  try{
+    const d=await api('/api/search?q='+encodeURIComponent(q));
+    if(my!==searchToken) return;
+    $('#vodHead').textContent=`Movies & Shows · ${d.items.length}`;
+    $('#vodRes').innerHTML=d.items.length?d.items.map(vodCard).join(''):'<div class="empty small">No movies or shows match.</div>';
+  }catch(e){
+    if(my!==searchToken) return;
+    $('#vodHead').textContent='Movies & Shows';
+    $('#vodRes').innerHTML=`<div class="empty small">${esc(e.message)}</div>`;
+  }
 }
 
 /* ---------- Player ---------- */
@@ -369,6 +458,7 @@ function renderOSD(){
     $('#osd-epg').innerHTML='<span class="muted">Loading guide…</span>';
   } else {
     $('#osd-num').textContent=''; $('#osd-name').textContent=c.title;
+    $('#favBtn').textContent=isVodFav(c.v)?'★ Favourite':'☆ Favourite';
     $('#osd-epg').textContent=c.sub.length>320?c.sub.slice(0,320)+'…':c.sub;
   }
 }
@@ -393,7 +483,7 @@ function showOSD(stay){
 $('#closeBtn').onclick=closePlayer;
 $('#prevBtn').onclick=()=>zap(-1);
 $('#nextBtn').onclick=()=>zap(1);
-$('#favBtn').onclick=()=>{ toggleFav(S.cur.ch.id); renderOSD(); loadEPG(S.cur.ch); };
+$('#favBtn').onclick=()=>{ if(!S.cur) return; if(S.cur.kind==='live'){ toggleFav(S.cur.ch.id); renderOSD(); loadEPG(S.cur.ch); } else { toggleVodFav(S.cur.v); $('#favBtn').textContent=isVodFav(S.cur.v)?'★ Favourite':'☆ Favourite'; } };
 
 /* ---------- remote-control navigation ---------- */
 function focusables(scope){ return [...(scope||document).querySelectorAll(scope?'.pbtn':'.focusable')].filter(e=>e.offsetParent!==null && !e.closest('[hidden]')); }
@@ -419,23 +509,30 @@ const isBack=e=>['Escape','GoBack','BrowserBack','XF86Back'].includes(e.key)||e.
 const isFavKey=e=>['f','F','ColorF0Red','ContextMenu'].includes(e.key)||e.keyCode===403;
 
 /* Hooks also called by the Fire TV app for the remote's Back / Menu / Channel buttons */
+function favCard(c){
+  if(!c) return false;
+  if(c.dataset.id){ toggleFav(c.dataset.id); return true; }
+  if(c.dataset.vk){ toggleVodFav(S.vodById.get(c.dataset.vk)); return true; }
+  return false;
+}
 function hometvBack(){
   if(!$('#player').hidden){ closePlayer(); return true; }
   if(document.activeElement===$('#q')){ if($('#q').value){ $('#q').value=''; onSearch(); } focusFirst('#grid .card'); return true; }
-  if(S.tab==='vod' && S.vod.series){ renderVodGrid(); focusFirst('#grid .card'); return true; }
+  if(S.sub){ S.sub.back(); return true; }
   if(S.query){ $('#q').value=''; onSearch(); focusFirst('#grid .card'); return true; }
   if(S.tab==='vod'){ switchTab('live'); focusFirst('#grid .card'); return true; }
   return false;
 }
 function hometvMenu(){
-  if(!$('#player').hidden){ if(S.cur && S.cur.kind==='live') $('#favBtn').click(); return true; }
-  const c=document.activeElement && document.activeElement.closest && document.activeElement.closest('.card[data-id]');
-  if(c){ toggleFav(c.dataset.id); return true; }
-  return false;
+  if(!$('#player').hidden){ $('#favBtn').click(); return true; }
+  const c=document.activeElement && document.activeElement.closest && document.activeElement.closest('.card');
+  return favCard(c);
 }
 function hometvZap(d){ if(!$('#player').hidden && S.cur && S.cur.kind==='live'){ showOSD(); zap(d); } }
 function hometvPause(){ if(!$('#player').hidden) closePlayer(); }
 
+/* Hold OK on a tile = add/remove favourite; short press = open. */
+const hold={el:null, t:null, done:false};
 document.addEventListener('keydown',e=>{
   const k=e.key, inInput=document.activeElement===$('#q');
   if(isBack(e) || (k==='Backspace' && !inInput)){ e.preventDefault(); hometvBack(); return; }
@@ -460,36 +557,60 @@ document.addEventListener('keydown',e=>{
     if(k==='ArrowDown'||k==='Enter'){ e.preventDefault(); focusFirst('#grid .card'); }
     return;
   }
+  if(k==='Enter'){
+    const c=document.activeElement && document.activeElement.closest && document.activeElement.closest('.card');
+    if(c && (c.dataset.id || c.dataset.vk)){
+      e.preventDefault();
+      if(!hold.el){ hold.el=c; hold.done=false; hold.t=setTimeout(()=>{ hold.done=true; favCard(c); }, 650); }
+      return;
+    }
+  }
   if(DIRS[k]){ e.preventDefault(); move(DIRS[k]); return; }
   if(k.length===1 && /\S/.test(k) && !e.ctrlKey && !e.metaKey && !e.altKey) $('#q').focus();
 });
+document.addEventListener('keyup',e=>{
+  if(e.key!=='Enter' || !hold.el) return;
+  clearTimeout(hold.t);
+  const c=hold.el, done=hold.done;
+  hold.el=null; hold.t=null; hold.done=false;
+  if(!done) c.click();
+});
+/* Touch / mouse: long-press or right-click a tile to favourite it. */
+$('#grid').addEventListener('contextmenu',e=>{ const c=e.target.closest('.card'); if(c && favCard(c)) e.preventDefault(); });
 
 /* ---------- wiring ---------- */
 let qT=null;
 function onSearch(){
   S.query=$('#q').value.trim();
-  if(S.tab==='live'){ if(S.live) renderLive(); } else if(S.vod.cats) loadVod(true);
+  if(S.query){ renderSearch(); return; }
+  searchToken++;
+  if(S.tab==='live'){ if(S.live) renderLive(); }
+  else if(S.vod.cats){ S.vod.items.length||S.vod.cat==='fav' ? renderVodGrid() : loadVod(true); }
 }
-$('#q').addEventListener('input',()=>{ clearTimeout(qT); qT=setTimeout(onSearch, S.tab==='live'?120:600); });
+$('#q').addEventListener('input',()=>{ clearTimeout(qT); qT=setTimeout(onSearch, 400); });
 $('#cats').addEventListener('click',e=>{
   const b=e.target.closest('.cat'); if(!b) return;
-  $('#q').value=''; S.query='';
+  $('#q').value=''; S.query=''; S.sub=null; searchToken++;
   if(S.tab==='live'){ S.cat=b.dataset.cat; renderLive(); } else { S.vod.cat=b.dataset.cat; loadVod(true); }
 });
 $('#grid').addEventListener('click',e=>{
   const b=e.target.closest('.card'); if(!b) return;
-  if(b.dataset.back){ renderVodGrid(); focusFirst('#grid .card'); return; }
-  if(b.dataset.ep){ playVod(S.vod.series, b.dataset.ep); return; }
+  if(b.dataset.back){ if(S.sub) S.sub.back(); return; }
+  if(b.dataset.season!==undefined && S.sub && S.sub.seasons){
+    const v=S.sub.v, se=S.sub.seasons[+b.dataset.season];
+    showEpisodes(v, se.cmd, se.series, v.name+' · '+(se.name||'Season'), S.renderSeasons); return;
+  }
+  if(b.dataset.ep){ playVod(S.sub.v, b.dataset.ep, S.sub.cmd); return; }
   if(b.dataset.id){ playLive(S.byId.get(b.dataset.id), S.list); return; }
-  const v=S.vod.items[+b.dataset.idx]; if(!v) return;
-  if(v.series.length) showEpisodes(v); else playVod(v,'');
+  if(b.dataset.vk){ openVod(S.vodById.get(b.dataset.vk)); }
 });
 document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>switchTab(t.dataset.tab)));
 function switchTab(tab){
   if(S.tab===tab) return;
-  S.tab=tab; document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===tab));
-  $('#q').value=''; S.query=''; $('#q').placeholder=tab==='live'?'Search channels…':'Search movies & shows…';
-  if(tab==='live'){ S.live?renderLive():loadLive(); } else { S.vod.cats?loadVod(true):initVod(); }
+  S.tab=tab; S.sub=null; searchToken++;
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===tab));
+  $('#q').value=''; S.query='';
+  if(tab==='live'){ S.live?renderLive():loadLive(); } else { !S.vod.cats ? initVod() : (S.vod.items.length||S.vod.cat==='fav' ? renderVodGrid() : loadVod(true)); }
 }
 function tick(){ $('#clock').textContent=new Date().toLocaleString([], {weekday:'short', hour:'numeric', minute:'2-digit'}); }
 tick(); setInterval(tick, 20000);
@@ -497,7 +618,7 @@ tick(); setInterval(tick, 20000);
 $('#setBtn').onclick=()=>{ location.href='/setup'; };
 (async()=>{
   try{ const c=await api('/api/config'); $('#setBtn').hidden=false; if(!c.configured){ location.replace('/setup'); return; } }catch(e){}
-  try{ Object.assign(S.prefs, await api('/api/prefs')); }catch(e){}
+  try{ const p=await api('/api/prefs'); for(const k of ['favorites','recent','vod_favorites']) if(Array.isArray(p[k])) S.prefs[k]=p[k]; }catch(e){}
   if(S.prefs.favorites.length) S.cat='fav';
   await loadLive();
   if(S.cat==='fav' && S.live && !liveList().length){ S.cat='all'; renderLive(); }

@@ -222,6 +222,8 @@ public class LocalServer {
                 json(out, 200, portal.vodList(str(r.q.get("category")), page, str(r.q.get("search")).trim()));
                 return;
             }
+            if (p.equals("/api/search")) { json(out, 200, portal.search(str(r.q.get("q")).trim())); return; }
+            if (p.equals("/api/seasons")) { json(out, 200, new JSONObject().put("seasons", portal.seasons(str(r.q.get("id")), str(r.q.get("module"))))); return; }
             if (p.equals("/api/play")) {
                 String url = "live".equals(str(r.q.get("kind")))
                         ? portal.link("live", portal.cmdFor(str(r.q.get("id"))), "", "")
@@ -270,9 +272,16 @@ public class LocalServer {
                 JSONObject in;
                 try { in = new JSONObject(new String(r.body, "UTF-8")); }
                 catch (JSONException e) { error(out, 400, "Bad request"); return; }
+                JSONArray vf = new JSONArray();
+                JSONArray inVf = in.optJSONArray("vod_favorites");
+                if (inVf != null) for (int i = 0; i < inVf.length() && i < 500; i++) {
+                    JSONObject o = inVf.optJSONObject(i);
+                    if (o != null) vf.put(o);
+                }
                 JSONObject clean = new JSONObject()
                         .put("favorites", limit(in.optJSONArray("favorites"), 2000))
-                        .put("recent", limit(in.optJSONArray("recent"), 50));
+                        .put("recent", limit(in.optJSONArray("recent"), 50))
+                        .put("vod_favorites", vf);
                 FileOutputStream fo = new FileOutputStream(prefsFile);
                 fo.write(clean.toString().getBytes("UTF-8"));
                 fo.close();
@@ -286,7 +295,8 @@ public class LocalServer {
             }
             json(out, 200, new JSONObject()
                     .put("favorites", p.optJSONArray("favorites") != null ? p.optJSONArray("favorites") : new JSONArray())
-                    .put("recent", p.optJSONArray("recent") != null ? p.optJSONArray("recent") : new JSONArray()));
+                    .put("recent", p.optJSONArray("recent") != null ? p.optJSONArray("recent") : new JSONArray())
+                    .put("vod_favorites", p.optJSONArray("vod_favorites") != null ? p.optJSONArray("vod_favorites") : new JSONArray()));
         }
     }
 

@@ -322,38 +322,99 @@ public class Portal {
         return out;
     }
 
-    public JSONObject vodList(String category, int page, String search) throws PortalException {
-        Map<String, String> p = map("type", "vod", "action", "get_ordered_list",
+    private JSONArray parseItems(JSONObject o, String module) throws JSONException {
+        JSONArray items = new JSONArray();
+        JSONArray data = o.optJSONArray("data");
+        if (data == null) return items;
+        for (int i = 0; i < data.length(); i++) {
+            JSONObject v = data.optJSONObject(i);
+            if (v == null) continue;
+            JSONArray series = new JSONArray();
+            JSONArray s = v.optJSONArray("series");
+            if (s != null) for (int j = 0; j < s.length(); j++) series.put(String.valueOf(s.opt(j)));
+            String year = v.optString("year", "");
+            String rating = v.optString("rating_imdb", "");
+            String poster = v.optString("screenshot_uri", "");
+            if (poster.isEmpty() || "null".equals(poster)) poster = v.optString("cover_big", v.optString("cover", ""));
+            boolean isSeries = "series".equals(module) || "1".equals(v.optString("is_series", "0"))
+                    || "true".equals(v.optString("is_series", ""));
+            items.put(new JSONObject().put("id", v.optString("id")).put("name", v.optString("name"))
+                    .put("kind", module).put("is_series", isSeries && series.length() == 0)
+                    .put("year", "null".equals(year) ? "" : year)
+                    .put("rating", "null".equals(rating) ? "" : rating)
+                    .put("desc", v.optString("description", ""))
+                    .put("poster", abs(poster, false))
+                    .put("cmd", v.optString("cmd", "")).put("series", series));
+        }
+        return items;
+    }
+
+    private JSONObject list(String module, String category, int page, String search) throws PortalException {
+        Map<String, String> p = map("type", module, "action", "get_ordered_list",
                 "category", category == null || category.isEmpty() ? "*" : category,
                 "genre", "*", "sortby", "added", "fav", "0", "p", String.valueOf(page));
         if (search != null && !search.isEmpty()) p.put("search", search);
         Object js = call(p, 30000);
         JSONObject o = js instanceof JSONObject ? (JSONObject) js : new JSONObject();
         try {
-            JSONArray items = new JSONArray();
-            JSONArray data = o.optJSONArray("data");
-            if (data != null) for (int i = 0; i < data.length(); i++) {
-                JSONObject v = data.optJSONObject(i);
-                if (v == null) continue;
-                JSONArray series = new JSONArray();
-                JSONArray s = v.optJSONArray("series");
-                if (s != null) for (int j = 0; j < s.length(); j++) series.put(String.valueOf(s.opt(j)));
-                String year = v.optString("year", "");
-                String rating = v.optString("rating_imdb", "");
-                items.put(new JSONObject().put("id", v.optString("id")).put("name", v.optString("name"))
-                        .put("year", "null".equals(year) ? "" : year)
-                        .put("rating", "null".equals(rating) ? "" : rating)
-                        .put("desc", v.optString("description", ""))
-                        .put("poster", abs(v.optString("screenshot_uri", ""), false))
-                        .put("cmd", v.optString("cmd", "")).put("series", series));
-            }
-            int total = o.optInt("total_items", 0);
+            JSONArray items = parseItems(o, module);
+            int total = o.optInt("total_items", items.length());
             int per = Math.max(1, o.optInt("max_page_items", 14));
             int pages = total > 0 ? Math.max(1, (total + per - 1) / per) : 1;
             return new JSONObject().put("items", items).put("page", page).put("total", total).put("pages", pages);
         } catch (JSONException e) {
-            throw new PortalException("Couldn't read the movie list: " + e.getMessage());
+            throw new PortalException("Couldn't read the list: " + e.getMessage());
         }
+    }
+
+    public JSONObject vodList(String category, int page, String search) throws PortalException {
+        return list("vod", category, page, search);
+    }
+
+    /** Searches movies and series (both the VOD module and, where the portal has one, the Series module). */
+    public JSONObject search(String q) throws PortalException {
+        JSONArray all = new JSONArray();
+        Set<String> seen = new HashSet<>();
+        PortalException first = null;
+        for (String module : new String[]{"vod", "series"}) {
+            for (int page = 1; page <= 3; page++) {
+                JSONObject r;
+                try { r = list(module, "*", page, q); }
+                catch (PortalException e) { if (first == null && "vod".equals(module)) first = e; break; }
+                JSONArray items = r.optJSONArray("items");
+                if (items == null || items.length() == 0) break;
+                for (int i = 0; i < items.length(); i++) {
+                    JSONObject it = items.optJSONObject(i);
+                    if (it == null) continue;
+                    String key = module + ":" + it.optString("id");
+                    if (seen.add(key)) all.put(it);
+                }
+                if (page >= r.optInt("pages", 1)) break;
+            }
+        }
+        if (all.length() == 0 && first != null) throw first;
+        try { return new JSONObject().put("items", all); }
+        catch (JSONException e) { throw new PortalException(e.getMessage()); }
+    }
+
+    /** Seasons of a series; each season has its own cmd and a list of episode numbers. */
+    public JSONArray seasons(String id, String module) throws PortalException {
+        Object js = call(map("type", "series".equals(module) ? "series" : "vod", "action", "get_ordered_list",
+                "movie_id", id, "season_id", "0", "episode_id", "0", "p", "1"), 30000);
+        JSONArray out = new JSONArray();
+        JSONArray data = js instanceof JSONObject ? ((JSONObject) js).optJSONArray("data") : null;
+        if (data == null) return out;
+        for (int i = 0; i < data.length(); i++) {
+            JSONObject se = data.optJSONObject(i);
+            if (se == null || se.optString("cmd", "").isEmpty()) continue;
+            JSONArray eps = new JSONArray();
+            JSONArray s = se.optJSONArray("series");
+            if (s != null) for (int j = 0; j < s.length(); j++) eps.put(String.valueOf(s.opt(j)));
+            if (eps.length() == 0) eps.put("1");
+            try { out.put(new JSONObject().put("name", se.optString("name", "Season " + (i + 1))).put("cmd", se.optString("cmd")).put("series", eps)); }
+            catch (JSONException ignored) { }
+        }
+        return out;
     }
 
     // ---------------------------------------------------------------- playback
