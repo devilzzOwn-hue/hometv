@@ -130,6 +130,27 @@ aside::-webkit-scrollbar{display:none}
 .btn:focus{box-shadow:0 0 0 3px var(--accent)}
 #more{margin:1rem 0;text-align:center}
 
+/* ---------- list view ---------- */
+.card .ex{display:none}
+#content.listmode .grid{display:flex;flex-direction:column;flex-wrap:nowrap;gap:.3rem;padding:.6rem 0;perspective:none}
+#content.listmode .card{width:100%!important;display:flex;align-items:center;gap:1.1rem;padding:.45rem .8rem;border-radius:.8rem}
+#content.listmode .card .tile{flex:none;width:7.2rem!important;height:4.05rem!important;border-radius:.55rem;box-shadow:0 4px 10px rgba(0,0,0,.35)}
+#content.listmode .card.poster .tile{width:3.4rem!important;height:5.1rem!important}
+#content.listmode .card.ep .tile{width:7.2rem!important;height:3rem!important;font-size:.85rem}
+#content.listmode .chan .ini{font-size:1.2rem}
+#content.listmode .badge-live,#content.listmode .poster .tags,#content.listmode .poster .ph,#content.listmode .sheen{display:none}
+#content.listmode .pb{left:.4rem;right:.4rem;bottom:.3rem;height:3px}
+#content.listmode .card .cap{margin:0;flex:1;min-width:0;color:rgba(255,255,255,.85)}
+#content.listmode .card .cap b{font-size:1rem}
+#content.listmode .card .ex{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin-top:.3rem;font-size:.78rem;color:var(--muted)}
+#content.listmode .card .ex .d{flex-basis:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#content.listmode .star{position:static;margin-left:auto;order:3;font-size:1.1rem}
+#content.listmode .card:focus{background:rgba(255,255,255,.1);box-shadow:inset 4px 0 0 var(--accent)}
+#content.listmode .card:focus .tile{transform:none;box-shadow:0 0 0 2px #fff}
+#content.listmode .card:focus .cap{transform:none;color:#fff}
+#layoutBtn{padding:.4rem .9rem;font-size:.82rem;white-space:nowrap}
+.headright{display:flex;align-items:center;gap:1rem}
+
 /* ---------- player ---------- */
 #player{position:fixed;inset:0;background:#000;z-index:20}
 #video{width:100%;height:100%;background:#000;display:block}
@@ -206,7 +227,7 @@ video::cue{background:rgba(0,0,0,.65);color:#fff;font-size:2.2rem;line-height:1.
   <section class="view" id="browseView" hidden>
     <aside id="cats"></aside>
     <div id="content">
-      <div class="headrow"><div id="heading"></div><div id="tip">Hold <b>OK</b> or press <b>☰</b> on a tile to add it to My List</div></div>
+      <div class="headrow"><div id="heading"></div><div class="headright"><div id="tip">Hold <b>OK</b> or press <b>☰</b> on a tile to add it to My List</div><button class="btn focusable" id="layoutBtn">☰ List view</button></div></div>
       <div id="grid"></div>
       <div id="more"></div>
     </div>
@@ -328,14 +349,14 @@ function chanCard(c){
   const p=S.epg.get(c.id), now=nowProg(p);
   const logo=c.logo?`<img src="${esc(c.logo)}" alt="" loading="lazy" data-n="${esc(c.name)}" onerror="logoFail(this)">`:`<div class="ini">${esc(ini(c.name))}</div>`;
   const pct=now?Math.max(2,Math.min(100,(Date.now()/1000-now.start)/Math.max(1,now.end-now.start)*100)):0;
-  return `<button class="card chan focusable" data-id="${esc(c.id)}" style="--h:${hueOf(c.name)}"><div class="tile"><div class="lg">${logo}</div><span class="badge-live">LIVE</span><div class="pb${now?' on':''}"><i style="width:${pct}%"></i></div>${isFav(c.id)?'<span class="star">★</span>':''}<i class="sheen"></i></div><div class="cap"><b>${esc(now?now.title:c.name)}</b><small>${esc(now?c.name:(c.number?'Channel '+c.number:''))}</small></div></button>`;
+  return `<button class="card chan focusable" data-id="${esc(c.id)}" style="--h:${hueOf(c.name)}"><div class="tile"><div class="lg">${logo}</div><span class="badge-live">LIVE</span><div class="pb${now?' on':''}"><i style="width:${pct}%"></i></div>${isFav(c.id)?'<span class="star">★</span>':''}<i class="sheen"></i></div><div class="cap"><b>${esc(now?now.title:c.name)}</b><small>${esc(now?c.name:(c.number?'Channel '+c.number:''))}</small><div class="ex">${c.number?`<span>Ch ${c.number}</span>`:''}${now?`<span>· ${fmt(now.start)}–${fmt(now.end)}</span>`:''}${genreTitle(c)?`<span>· ${esc(genreTitle(c))}</span>`:''}</div></div></button>`;
 }
 function vodCard(v){
   S.vodById.set(vkey(v),v);
   const p=parseTitle(v.name), series=v.is_series||(v.series&&v.series.length);
   const meta=[p.year||v.year, v.rating&&('★ '+v.rating), series&&'Series'].filter(Boolean).join(' · ');
   const tags=[...p.q.map(x=>`<span class="chip q">${esc(x)}</span>`), ...p.lang.slice(0,1).map(x=>`<span class="chip">${esc(x)}</span>`)].join('');
-  return `<button class="card poster focusable" data-vk="${esc(vkey(v))}" style="--h:${hueOf(v.name)}"><div class="tile">${v.poster?`<img src="${esc(v.poster)}" alt="" loading="lazy" onerror="this.remove()">`:''}<div class="ph"${v.poster?' style="z-index:-1"':''}>${esc(p.title)}</div><div class="tags">${tags}</div>${isVodFav(v)?'<span class="star">★</span>':''}<i class="sheen"></i></div><div class="cap"><b>${esc(p.title)}</b><small>${esc(meta)}</small></div></button>`;
+  return `<button class="card poster focusable" data-vk="${esc(vkey(v))}" style="--h:${hueOf(v.name)}"><div class="tile">${v.poster?`<img src="${esc(v.poster)}" alt="" loading="lazy" onerror="this.remove()">`:''}<div class="ph"${v.poster?' style="z-index:-1"':''}>${esc(p.title)}</div><div class="tags">${tags}</div>${isVodFav(v)?'<span class="star">★</span>':''}<i class="sheen"></i></div><div class="cap"><b>${esc(p.title)}</b><small>${esc(meta)}</small><div class="ex">${chipsHTML(p)}${v.desc?`<span class="d">${esc(String(v.desc).slice(0,180))}</span>`:''}</div></div></button>`;
 }
 function refreshChanCard(id){
   const c=S.byId.get(id); if(!c) return;
@@ -492,6 +513,20 @@ async function loadHomeVod(){
     if(S.view==='home') renderHome();
   }catch(e){}
 }
+
+/* ---------- grid / list switch (remembered on this TV) ---------- */
+function getLayout(){ try{ return localStorage.getItem('hometv.layout')||'grid'; }catch(e){ return 'grid'; } }
+function applyLayout(){
+  const list=getLayout()==='list';
+  $('#content').classList.toggle('listmode', list);
+  $('#layoutBtn').textContent=list?'▦ Grid view':'☰ List view';
+}
+$('#layoutBtn').onclick=()=>{
+  const next=getLayout()==='list'?'grid':'list';
+  try{ localStorage.setItem('hometv.layout', next); }catch(e){}
+  applyLayout(); toast(next==='list'?'List view':'Grid view');
+};
+applyLayout();
 
 /* ---------- views ---------- */
 function showView(v){
@@ -717,10 +752,12 @@ async function renderSearch(){
   try{
     const d=await api('/api/search?q='+encodeURIComponent(q), ctl?{signal:ctl.signal}:undefined);
     if(my!==searchToken) return;
-    $('#vodHead').textContent=`Movies & shows · ${d.items.length}`;
+    const best=d.items.filter(x=>x.match!=='other'), other=d.items.filter(x=>x.match==='other');
+    $('#vodHead').textContent=`Movies & shows · ${best.length}`;
     const src=d.sources||{}, part=(n,x)=>x?(x.ok?`${n}: ${x.count}`:`${n}: not available on this portal`):'';
     const note=[part('Shows',src.series), part('Movies',src.movies)].filter(Boolean).join(' · ');
-    $('#vodRes').innerHTML=d.items.length?d.items.map(vodCard).join(''):`<div class="empty small">No movies or shows match.${note?'<br><small>Searched '+esc(note)+'</small>':''}<br><small>Tip: try one distinctive word, e.g. “crorepati”.</small></div>`;
+    if(other.length) $('#vodRes').closest('.section').insertAdjacentHTML('afterend',`<div class="section"><h4>Other matches · ${other.length} <small style="font-weight:400">(word found in the description or cast)</small></h4><div class="grid">${other.map(vodCard).join('')}</div></div>`);
+    $('#vodRes').innerHTML=best.length?best.map(vodCard).join(''):other.length?'<div class="empty small">No titles contain that word. See other matches below.</div>':`<div class="empty small">No movies or shows match.${note?'<br><small>Searched '+esc(note)+'</small>':''}<br><small>Tip: try one distinctive word, e.g. “crorepati”.</small></div>`;
   }catch(e){
     if(my!==searchToken || (e && e.name==='AbortError')) return;
     $('#vodHead').textContent='Movies & shows';

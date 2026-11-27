@@ -449,6 +449,29 @@ public class Portal {
         return out.size() > 2 ? out.subList(0, 2) : out;
     }
 
+    /** Title without trailing tags such as "(Hindi-Netflix) (4K)". */
+    static String cleanTitle(String name) {
+        String t = String.valueOf(name).trim();
+        String prev;
+        do { prev = t; t = t.replaceAll("\\s*[\\(\\[][^\\(\\)\\[\\]]{1,40}[\\)\\]]\\s*$", "").trim(); } while (!t.equals(prev) && !t.isEmpty());
+        return t.isEmpty() ? String.valueOf(name) : t;
+    }
+
+    /** 0 = exact title, 1 = starts with query, 2 = a word starts with it, 3 = contains it, 4 = all words present, 9 = no title match. */
+    static int rank(String name, String q) {
+        String t = norm(cleanTitle(name)), nq = norm(q);
+        if (nq.isEmpty()) return 9;
+        if (t.equals(nq)) return 0;
+        if (t.startsWith(nq)) return 1;
+        String spaced = " " + String.valueOf(cleanTitle(name)).toLowerCase(Locale.US).replaceAll("[^a-z0-9]+", " ");
+        String firstWord = q.trim().toLowerCase(Locale.US).split("[^a-z0-9]+")[0];
+        if (!firstWord.isEmpty() && spaced.contains(" " + firstWord) && t.contains(nq)) return 2;
+        if (t.contains(nq)) return 3;
+        boolean all = true;
+        for (String w : q.trim().split("\\s+")) { String nw = norm(w); if (nw.length() >= 2 && !t.contains(nw)) { all = false; break; } }
+        return all ? 4 : 9;
+    }
+
     /** True if the title contains the query once spaces, hyphens and punctuation are ignored. */
     static boolean matches(String title, String q) {
         String t = norm(title), nq = norm(q);
@@ -482,7 +505,7 @@ public class Portal {
             }
         }
         try {
-            JSONArray all = new JSONArray();
+            List<JSONObject> found = new ArrayList<>();
             Set<String> seen = new HashSet<>();
             boolean anyOk = false;
             String firstErr = null;
@@ -505,13 +528,25 @@ public class Portal {
                     // Results from the broader stem search are kept only if they really match the query.
                     if (futureIsVariant.get(f) && !matches(o.optString("name"), q)) continue;
                     if (seen.add(o.optString("kind") + ":" + o.optString("id"))) {
-                        all.put(o);
+                        found.add(o);
                         int[] c = counts.get(module);
                         if (c == null) { c = new int[1]; counts.put(module, c); }
                         c[0]++;
                     }
                 }
             }
+            // Best matches first: exact title, then title starting with the query, then word matches, then the rest.
+            final java.util.IdentityHashMap<JSONObject, Integer> score = new java.util.IdentityHashMap<>();
+            for (JSONObject o : found) {
+                int sc = rank(o.optString("name"), q);
+                score.put(o, sc);
+                try { o.put("match", sc < 9 ? "title" : "other"); } catch (JSONException ignored) { }
+            }
+            Collections.sort(found, new Comparator<JSONObject>() {
+                @Override public int compare(JSONObject x, JSONObject y) { return score.get(x) - score.get(y); }
+            });
+            JSONArray all = new JSONArray();
+            for (JSONObject o : found) all.put(o);
             if (all.length() == 0 && !anyOk) throw new PortalException(firstErr != null ? firstErr : "Search failed");
             JSONObject sources = new JSONObject();
             for (String[] m : new String[][]{{"movies", "vod"}, {"series", "series"}}) {
