@@ -237,7 +237,7 @@ function searchChannels(q){
   const toks=nq.split(' '), out=[];
   for(const c of S.live.channels){
     if(String(c.number)===nq){ out.push([0,c]); continue; }
-    if(!toks.every(t=>c._n.includes(t))) continue;
+    if(!toks.every(t=>c._n.includes(t)) && !c._n.replace(/ /g,'').includes(nq.replace(/ /g,''))) continue;
     let s = c._n.startsWith(nq) ? 1 : (' '+c._n).includes(' '+toks[0]) ? 2 : 3;
     if(isFav(c.id)) s-=.5;
     out.push([s,c]);

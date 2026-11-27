@@ -404,7 +404,7 @@ public class Portal {
     }
 
     private final Map<String, Object[]> searchCache = new HashMap<>();
-    private final java.util.concurrent.ExecutorService searchPool = java.util.concurrent.Executors.newFixedThreadPool(4);
+    private final java.util.concurrent.ExecutorService searchPool = java.util.concurrent.Executors.newFixedThreadPool(6);
 
     private JSONObject searchModule(String module, String q) {
         JSONObject res = new JSONObject();
@@ -425,44 +425,95 @@ public class Portal {
         return res;
     }
 
+    static String norm(String s) {
+        return String.valueOf(s).toLowerCase(Locale.US).replaceAll("[^a-z0-9]+", "");
+    }
+
+    /** Extra search terms so "spiderman" also finds "Spider-Man" and "kbc crorepati" finds "Crorepati". */
+    static List<String> variants(String q) {
+        LinkedHashSet<String> v = new LinkedHashSet<>();
+        v.add(q.trim());
+        String[] words = q.trim().split("\\s+");
+        String longest = "";
+        for (String w : words) { String n = norm(w); if (n.length() > longest.length()) longest = n; }
+        // A short stem of the longest word matches hyphenated / spaced spellings.
+        if (longest.length() >= 7) v.add(longest.substring(0, 6));
+        else if (words.length > 1 && longest.length() >= 4) v.add(longest);
+        List<String> out = new ArrayList<>(v);
+        return out.size() > 2 ? out.subList(0, 2) : out;
+    }
+
+    /** True if the title contains the query once spaces, hyphens and punctuation are ignored. */
+    static boolean matches(String title, String q) {
+        String t = norm(title), nq = norm(q);
+        if (nq.isEmpty() || t.contains(nq)) return true;
+        for (String w : q.trim().split("\\s+")) {
+            String nw = norm(w);
+            if (nw.length() >= 3 && !t.contains(nw)) return false;
+        }
+        return true;
+    }
+
     /** Searches movies (VOD) and series at the same time; results are cached for 10 minutes. */
-    public JSONObject search(String q) throws PortalException {
+    public JSONObject search(final String q) throws PortalException {
         final String key = q.toLowerCase(Locale.US).trim();
         synchronized (searchCache) {
             Object[] hit = searchCache.get(key);
             if (hit != null && System.currentTimeMillis() - (Long) hit[0] < 10 * 60 * 1000L) return (JSONObject) hit[1];
         }
-        java.util.concurrent.Future<JSONObject> vodF = searchPool.submit(new java.util.concurrent.Callable<JSONObject>() {
-            @Override public JSONObject call() { return searchModule("vod", q); }
-        });
-        java.util.concurrent.Future<JSONObject> serF = searchPool.submit(new java.util.concurrent.Callable<JSONObject>() {
-            @Override public JSONObject call() { return searchModule("series", q); }
-        });
-        JSONObject vod, ser;
-        try {
-            vod = vodF.get(45, java.util.concurrent.TimeUnit.SECONDS);
-            ser = serF.get(45, java.util.concurrent.TimeUnit.SECONDS);
-        } catch (Exception e) {
-            throw new PortalException("Search timed out");
+        final List<String> terms = variants(q);
+        List<java.util.concurrent.Future<JSONObject>> futures = new ArrayList<>();
+        final List<String> futureModule = new ArrayList<>();
+        final List<Boolean> futureIsVariant = new ArrayList<>();
+        for (final String module : new String[]{"series", "vod"}) {
+            for (int i = 0; i < terms.size(); i++) {
+                final String term = terms.get(i);
+                futures.add(searchPool.submit(new java.util.concurrent.Callable<JSONObject>() {
+                    @Override public JSONObject call() { return searchModule(module, term); }
+                }));
+                futureModule.add(module);
+                futureIsVariant.add(i > 0);
+            }
         }
         try {
             JSONArray all = new JSONArray();
             Set<String> seen = new HashSet<>();
-            for (JSONObject src : new JSONObject[]{ser, vod}) {   // shows first, then movies
-                JSONArray it = src.optJSONArray("items");
+            boolean anyOk = false;
+            String firstErr = null;
+            Map<String, int[]> counts = new HashMap<>();
+            Map<String, Boolean> okByModule = new HashMap<>();
+            for (int f = 0; f < futures.size(); f++) {
+                JSONObject r;
+                try { r = futures.get(f).get(45, java.util.concurrent.TimeUnit.SECONDS); }
+                catch (Exception e) { continue; }
+                String module = futureModule.get(f);
+                boolean ok = r.optBoolean("ok");
+                anyOk |= ok;
+                okByModule.put(module, Boolean.TRUE.equals(okByModule.get(module)) || ok);
+                if (!ok && firstErr == null && "vod".equals(module)) firstErr = r.optString("error");
+                JSONArray it = r.optJSONArray("items");
                 if (it == null) continue;
                 for (int i = 0; i < it.length(); i++) {
                     JSONObject o = it.optJSONObject(i);
-                    if (o != null && seen.add(o.optString("kind") + ":" + o.optString("id"))) all.put(o);
+                    if (o == null) continue;
+                    // Results from the broader stem search are kept only if they really match the query.
+                    if (futureIsVariant.get(f) && !matches(o.optString("name"), q)) continue;
+                    if (seen.add(o.optString("kind") + ":" + o.optString("id"))) {
+                        all.put(o);
+                        int[] c = counts.get(module);
+                        if (c == null) { c = new int[1]; counts.put(module, c); }
+                        c[0]++;
+                    }
                 }
             }
-            if (all.length() == 0 && !vod.optBoolean("ok") && !ser.optBoolean("ok")) {
-                throw new PortalException(vod.optString("error", "Search failed"));
+            if (all.length() == 0 && !anyOk) throw new PortalException(firstErr != null ? firstErr : "Search failed");
+            JSONObject sources = new JSONObject();
+            for (String[] m : new String[][]{{"movies", "vod"}, {"series", "series"}}) {
+                int[] c = counts.get(m[1]);
+                sources.put(m[0], new JSONObject().put("ok", Boolean.TRUE.equals(okByModule.get(m[1])))
+                        .put("count", c == null ? 0 : c[0]).put("error", ""));
             }
-            JSONObject sources = new JSONObject()
-                    .put("movies", new JSONObject().put("ok", vod.optBoolean("ok")).put("count", vod.optJSONArray("items").length()).put("error", vod.optString("error", "")))
-                    .put("series", new JSONObject().put("ok", ser.optBoolean("ok")).put("count", ser.optJSONArray("items").length()).put("error", ser.optString("error", "")));
-            JSONObject out = new JSONObject().put("items", all).put("sources", sources);
+            JSONObject out = new JSONObject().put("items", all).put("sources", sources).put("terms", new JSONArray(terms));
             synchronized (searchCache) {
                 if (searchCache.size() > 50) searchCache.clear();
                 searchCache.put(key, new Object[]{System.currentTimeMillis(), out});
