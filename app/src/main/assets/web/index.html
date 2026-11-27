@@ -151,6 +151,20 @@ aside::-webkit-scrollbar{display:none}
 #layoutBtn{padding:.4rem .9rem;font-size:.82rem;white-space:nowrap}
 .headright{display:flex;align-items:center;gap:1rem}
 
+/* ---------- theme picker ---------- */
+#themeBtn{background:none;border:0;color:var(--muted);padding:.45rem .8rem;border-radius:2rem;cursor:pointer}
+#themeBtn:focus{box-shadow:0 0 0 3px var(--accent);color:var(--text)}
+#themePanel{position:fixed;inset:0;z-index:30;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center}
+#themePanel .box{background:#151922;border:1px solid rgba(255,255,255,.1);border-radius:1.2rem;padding:1.6rem 1.8rem;width:min(46rem,92vw);box-shadow:0 30px 80px rgba(0,0,0,.6);color:#f2f4f7}
+#themePanel h2{margin:0 0 .3rem;font-size:1.4rem}#themePanel p{margin:0 0 1.1rem;color:#9aa4b2;font-size:.9rem}
+.themes{display:grid;grid-template-columns:repeat(3,1fr);gap:.8rem}
+.themeOpt{display:flex;flex-direction:column;align-items:flex-start;gap:.6rem;padding:.9rem;border-radius:.9rem;border:2px solid transparent;background:rgba(255,255,255,.05);cursor:pointer;text-align:left;color:#f2f4f7}
+.themeOpt .sw{display:flex;width:100%;height:3.2rem;border-radius:.55rem;overflow:hidden;box-shadow:inset 0 0 0 1px rgba(255,255,255,.12)}
+.themeOpt .sw i{flex:3}.themeOpt .sw b{flex:1}
+.themeOpt span{font-weight:600;font-size:.92rem}.themeOpt small{color:#9aa4b2;font-size:.75rem;margin-top:-.4rem}
+.themeOpt.on{border-color:rgba(255,255,255,.5)}
+.themeOpt:focus{border-color:#fff;box-shadow:0 0 0 3px rgba(255,255,255,.25);transform:scale(1.04)}
+
 /* ---------- player ---------- */
 #player{position:fixed;inset:0;background:#000;z-index:20}
 #video{width:100%;height:100%;background:#000;display:block}
@@ -202,6 +216,7 @@ video::cue{background:rgba(0,0,0,.65);color:#fff;font-size:2.2rem;line-height:1.
   </nav>
   <div class="search"><input id="q" class="focusable" placeholder="Search channels, movies & shows…" autocomplete="off" spellcheck="false"></div>
   <div id="clock"></div>
+  <button class="focusable" id="themeBtn">🎨 Theme</button>
   <button class="focusable" id="setBtn" hidden>⚙ Settings</button>
 </header>
 
@@ -254,6 +269,8 @@ video::cue{background:rgba(0,0,0,.65);color:#fff;font-size:2.2rem;line-height:1.
   </div>
 </div>
 <div id="toast"></div>
+<div id="themePanel" hidden><div class="box"><h2>Theme</h2><p>Pick a look. Your choice is remembered on this TV.</p><div class="themes" id="themeList"></div></div></div>
+<style id="themeStyle"></style>
 
 <script src="/static/vendor/mpegts.js"></script>
 <script src="/static/vendor/hls.min.js"></script>
@@ -527,6 +544,25 @@ $('#layoutBtn').onclick=()=>{
   applyLayout(); toast(next==='list'?'List view':'Grid view');
 };
 applyLayout();
+
+/* ---------- themes ---------- */
+const THEMES={"amber": "", "red": ":root{--accent:#e50914;--live:#e50914}\n#bg{background:#000!important}#bgimg.on{opacity:.22}\n#bg:after{background:linear-gradient(180deg,rgba(0,0,0,.15),rgba(0,0,0,.75) 50%,#000 100%)!important}\n.tabs{background:rgba(255,255,255,.08)}.tab.active{background:#e50914!important;color:#fff!important}\n.brand span,.hTag{color:#e50914!important}\n.chip.q{background:#e50914!important;border-color:#e50914!important;color:#fff!important}\n.card:focus .tile{box-shadow:0 0 0 3px #fff,0 30px 55px rgba(0,0,0,.85)!important}", "indigo": ":root{--accent:#ffc94d;--live:#ff4d6d;--muted:#b9bde6}\n#bg{background:radial-gradient(120% 90% at 75% 0%,#3d3298 0%,#1b1658 45%,#0b0a26 100%)!important}#bgimg.on{opacity:.2}\n#bg:after{background:linear-gradient(180deg,rgba(11,10,38,.05),rgba(11,10,38,.55) 55%,rgba(11,10,38,.95))!important}\n.tabs{background:rgba(255,255,255,.08)}.tab.active{background:#ffc94d!important;color:#1b1658!important}\n.brand span,.hTag{color:#ffc94d!important}\n.hbtn.pr{background:#ffc94d!important;color:#1b1658!important}\n.chip.q{background:#ffc94d!important;border-color:#ffc94d!important;color:#1b1658!important}\n.card:focus .tile{box-shadow:0 0 0 3px #ffc94d,0 30px 55px rgba(0,0,0,.7)!important}\n.card .cap small,.row h3 small{color:#9ea3d6!important}", "saffron": ":root{--accent:#ff9933;--live:#14b8a6;--muted:#c4ad98}\n#bg{background:radial-gradient(120% 90% at 75% 0%,#5a3216 0%,#26180e 50%,#100b07 100%)!important}#bgimg.on{opacity:.2}\n#bg:after{background:linear-gradient(180deg,rgba(16,11,7,.05),rgba(16,11,7,.6) 55%,rgba(16,11,7,.95))!important}\n.tabs{background:rgba(255,255,255,.07)}.tab.active{background:#ff9933!important;color:#1a0f05!important}\n.brand span,.hTag{color:#ff9933!important}\n.hbtn.pr{background:#ff9933!important;color:#1a0f05!important}\n.chip.q{background:#ff9933!important;border-color:#ff9933!important;color:#1a0f05!important}\n.badge-live{background:#14b8a6!important}.hTag .dot{background:#14b8a6!important;box-shadow:0 0 10px #14b8a6!important}\n.card:focus .tile{box-shadow:0 0 0 3px #ff9933,0 30px 55px rgba(0,0,0,.7)!important}", "teal": ":root{--accent:#2dd4bf;--live:#f43f5e;--muted:#8fb3b5}\n#bg{background:radial-gradient(120% 90% at 75% 0%,#0f4a52 0%,#08262d 50%,#031216 100%)!important}#bgimg.on{opacity:.2}\n#bg:after{background:linear-gradient(180deg,rgba(3,18,22,.05),rgba(3,18,22,.6) 55%,rgba(3,18,22,.95))!important}\n.tabs{background:rgba(255,255,255,.07)}.tab.active{background:#2dd4bf!important;color:#042a2a!important}\n.brand span,.hTag{color:#2dd4bf!important}\n.hbtn.pr{background:#2dd4bf!important;color:#042a2a!important}\n.chip.q{background:#2dd4bf!important;border-color:#2dd4bf!important;color:#042a2a!important}\n.card:focus .tile{box-shadow:0 0 0 3px #2dd4bf,0 30px 55px rgba(0,0,0,.7)!important}", "day": ":root{--text:#111418;--muted:#5b6573;--accent:#d9480f;--live:#e11d48}\nbody{color:#111418!important}\n#bg{background:linear-gradient(180deg,#f6f3ee 0%,#ebe5dc 100%)!important}#bgimg{display:none!important}#bg:after{display:none!important}\n.brand{color:#111418}.brand span{color:#d9480f!important}\n.tabs{background:rgba(0,0,0,.06)!important}.tab{color:#3b4350!important}.tab.active{background:#111418!important;color:#fff!important}\n#q{background-color:rgba(0,0,0,.06)!important;color:#111418!important}#q::placeholder{color:#6b7480!important}\n#clock,#setBtn{color:#5b6573!important}\n.hTag{color:#d9480f!important}.hTitle{color:#111418!important;text-shadow:none!important}\n.hDesc,.hMeta{color:#3a434f!important}.chip{color:#111418!important;border-color:rgba(0,0,0,.3)!important}.chip.l{background:rgba(0,0,0,.08)!important}\n.chip.q{background:#d9480f!important;border-color:#d9480f!important;color:#fff!important}\n#heroArt:after{background:linear-gradient(0deg,#efe9e1 0%,rgba(239,233,225,0) 45%)!important}\n.hbtn{background:rgba(0,0,0,.08)!important;color:#111418!important}.hbtn.pr{background:#111418!important;color:#fff!important}\n.row h3{color:#111418!important}.row h3 small{color:#6b7480!important}\n.card .cap{color:#3a434f!important}.card .cap small{color:#6b7480!important}.card:focus .cap{color:#111418!important}\n.card .tile{box-shadow:0 8px 18px rgba(0,0,0,.18)!important}\n.card:focus .tile{box-shadow:0 0 0 3px #d9480f,0 24px 40px rgba(0,0,0,.28)!important}"};
+const THEME_META={"amber": ["Midnight Amber", "#0c0f14", "#f5a524"], "red": ["Cinema Red", "#000000", "#e50914"], "indigo": ["Royal Indigo & Gold", "#1b1658", "#ffc94d"], "saffron": ["Saffron Night", "#26180e", "#ff9933"], "teal": ["Ocean Teal", "#08262d", "#2dd4bf"], "day": ["Daylight", "#f1ece4", "#d9480f"]};
+function getTheme(){ try{ return localStorage.getItem('hometv.theme')||'indigo'; }catch(e){ return 'indigo'; } }
+function applyTheme(t){ if(!(t in THEMES)) t='indigo'; $('#themeStyle').textContent=THEMES[t]; document.documentElement.dataset.theme=t; }
+function openThemes(){
+  const cur=getTheme();
+  $('#themeList').innerHTML=Object.keys(THEMES).map(k=>{ const [n,bg,ac]=THEME_META[k]; return `<button class="themeOpt focusable${k===cur?' on':''}" data-theme="${k}"><div class="sw"><i style="background:${bg}"></i><b style="background:${ac}"></b></div><span>${esc(n)}${k===cur?' ✓':''}</span>${k==='indigo'?'<small>Default</small>':''}</button>`; }).join('');
+  S.themeReturn=document.activeElement; $('#themePanel').hidden=false;
+  const on=$('#themeList .themeOpt.on'); (on||$('#themeList .themeOpt')).focus();
+}
+function closeThemes(){ $('#themePanel').hidden=true; const f=S.themeReturn; if(f && document.body.contains(f)) f.focus(); else $('#themeBtn').focus(); }
+$('#themeBtn').onclick=openThemes;
+$('#themeList').addEventListener('click',e=>{ const b=e.target.closest('.themeOpt'); if(!b) return; try{ localStorage.setItem('hometv.theme', b.dataset.theme); }catch(er){} applyTheme(b.dataset.theme); toast('Theme: '+THEME_META[b.dataset.theme][0]); closeThemes(); });
+// live preview while moving through the options
+$('#themeList').addEventListener('focusin',e=>{ const b=e.target.closest('.themeOpt'); if(b) applyTheme(b.dataset.theme); });
+$('#themePanel').addEventListener('click',e=>{ if(e.target.id==='themePanel'){ applyTheme(getTheme()); closeThemes(); } });
+applyTheme(getTheme());
 
 /* ---------- views ---------- */
 function showView(v){
@@ -895,7 +931,7 @@ $('#nextBtn').onclick=()=>zap(1);
 $('#favBtn').onclick=()=>{ if(!S.cur) return; if(S.cur.kind==='live') toggleFav(S.cur.ch.id); else toggleVodFav(S.cur.v); renderOSD(); if(S.cur.kind==='live') loadEPG(S.cur.ch); };
 
 /* ---------- remote-control navigation ---------- */
-function focusables(scope){ return [...(scope||document).querySelectorAll(scope?'.pbtn':'.focusable')].filter(e=>e.offsetParent!==null && !e.closest('[hidden]') && !e.hidden); }
+function focusables(scope){ if(!scope && !$('#themePanel').hidden) scope=$('#themePanel'); return [...(scope||document).querySelectorAll(scope&&scope.id==='osd'?'.pbtn':'.focusable')].filter(e=>e.offsetParent!==null && !e.closest('[hidden]') && !e.hidden); }
 function move(dir, scope){
   const list=focusables(scope), a=document.activeElement;
   if(!a || !list.includes(a)){ (list.find(e=>e.classList.contains('card'))||list[0])?.focus(); return; }
@@ -932,6 +968,7 @@ function favCard(c){
   return false;
 }
 function hometvBack(){
+  if(!$('#themePanel').hidden){ applyTheme(getTheme()); closeThemes(); return true; }
   if(!$('#player').hidden){ closePlayer(); return true; }
   if(document.activeElement===$('#q')){ if($('#q').value){ $('#q').value=''; onSearch(); } else $('#q').blur(); focusFirst(S.view==='home'?'#rows .card':'#grid .card'); return true; }
   if(S.sub){ S.sub.back(); return true; }
@@ -942,6 +979,7 @@ function hometvBack(){
   return false;
 }
 function hometvMenu(){
+  if(!$('#themePanel').hidden) return true;
   if(!$('#player').hidden){ $('#favBtn').click(); return true; }
   const c=document.activeElement && document.activeElement.closest && document.activeElement.closest('.card');
   if(c) return favCard(c);

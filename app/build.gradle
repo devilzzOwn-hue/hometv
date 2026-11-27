@@ -10,8 +10,8 @@ android {
         applicationId 'tv.home.hometv'
         minSdk 22          // Fire OS 5 and newer
         targetSdk 34
-        versionCode 11
-        versionName "2.2"
+        versionCode 12
+        versionName "2.3"
     }
 
     signingConfigs {
