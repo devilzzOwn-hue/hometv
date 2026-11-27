@@ -79,6 +79,30 @@ aside{width:16rem;flex:none;overflow-y:auto;padding:1rem .7rem;border-right:1px 
 .sgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(10.5rem,1fr));gap:.9rem}
 .sgrid.posters{grid-template-columns:repeat(auto-fill,minmax(9rem,1fr))}
 .empty.small{padding:.5rem 0;text-align:left}
+
+/* ---------- 3D cards ---------- */
+#grid,.sgrid{perspective:1400px;perspective-origin:50% 30%}
+.card{transform-style:preserve-3d;background:linear-gradient(160deg,#26324a 0%,#1a2230 55%,#131922 100%);
+  border:1px solid rgba(255,255,255,.07);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.10),inset 0 -3px 0 rgba(0,0,0,.35),0 8px 16px rgba(0,0,0,.45),0 2px 4px rgba(0,0,0,.4);
+  transition:transform .22s cubic-bezier(.2,.8,.2,1),box-shadow .22s,opacity .22s,border-color .22s;will-change:transform}
+.card::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;
+  background:linear-gradient(118deg,rgba(255,255,255,.22) 0%,rgba(255,255,255,.04) 32%,rgba(255,255,255,0) 50%);opacity:.45;transition:opacity .22s}
+.card:hover{background:linear-gradient(160deg,#2b3852 0%,#1d2635 55%,#151c26 100%)}
+.card:focus{outline:none;z-index:3;border-color:var(--focus);
+  transform:translateY(-.55rem) rotateX(9deg) scale(1.08);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 0 0 3px var(--focus),0 26px 44px rgba(0,0,0,.7),0 0 34px rgba(245,165,36,.38)}
+.card:focus::after{opacity:1}
+#grid:focus-within .card:not(:focus),.sgrid:focus-within .card:not(:focus){opacity:.72}
+.card .logo{background:radial-gradient(120% 90% at 50% 20%,rgba(255,255,255,.10),rgba(0,0,0,.25));border-radius:.7rem;padding:.35rem;
+  box-shadow:inset 0 2px 6px rgba(0,0,0,.55),inset 0 -1px 0 rgba(255,255,255,.06);transform:translateZ(18px)}
+.card .logo:has(.initials){background:none;box-shadow:none;padding:0}
+.card .name{transform:translateZ(12px)}
+.card .star{transform:translateZ(24px);text-shadow:0 2px 6px rgba(0,0,0,.6)}
+.initials{background:linear-gradient(145deg,#33415a,#1f2838);box-shadow:inset 0 1px 0 rgba(255,255,255,.12)}
+.card.poster .img{box-shadow:inset 0 -40px 40px -20px rgba(0,0,0,.55)}
+.card.poster:focus{transform:translateY(-.7rem) rotateX(7deg) scale(1.07)}
+@media (hover:hover){.card.tilt{transform:translateY(-.3rem) rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg)) scale(1.04)}}
 @media (max-width:760px){
   header{flex-wrap:wrap;gap:.6rem;padding:.7rem .9rem}
   .search{order:3;flex-basis:100%;max-width:none}
@@ -605,6 +629,17 @@ document.addEventListener('keyup',e=>{
 });
 /* Touch / mouse: long-press or right-click a tile to favourite it. */
 $('#grid').addEventListener('contextmenu',e=>{ const c=e.target.closest('.card'); if(c && favCard(c)) e.preventDefault(); });
+
+/* Mouse tilt for 3D cards (laptops/desktops only) */
+if(window.matchMedia && matchMedia('(hover:hover)').matches){
+  document.addEventListener('mousemove',e=>{
+    const c=e.target.closest && e.target.closest('.card');
+    document.querySelectorAll('.card.tilt').forEach(x=>{ if(x!==c){ x.classList.remove('tilt'); x.style.removeProperty('--rx'); x.style.removeProperty('--ry'); } });
+    if(!c || c===document.activeElement) return;
+    const r=c.getBoundingClientRect(), x=(e.clientX-r.left)/r.width-.5, y=(e.clientY-r.top)/r.height-.5;
+    c.style.setProperty('--ry',(x*16).toFixed(1)+'deg'); c.style.setProperty('--rx',(-y*16).toFixed(1)+'deg'); c.classList.add('tilt');
+  });
+}
 
 /* ---------- wiring ---------- */
 let qT=null;
