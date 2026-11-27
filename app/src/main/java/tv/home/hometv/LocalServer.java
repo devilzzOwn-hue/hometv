@@ -234,10 +234,12 @@ public class LocalServer {
                 String url = "live".equals(str(r.q.get("kind")))
                         ? portal.link("live", portal.cmdFor(str(r.q.get("id"))), "", "")
                         : portal.link("vod", str(r.q.get("cmd")), str(r.q.get("series")), str(r.q.get("id")));
-                json(out, 200, new JSONObject().put("type", streamType(url)).put("url", proxied(url)));
+                JSONArray subs = "live".equals(str(r.q.get("kind"))) ? new JSONArray() : portal.subtitles(portal.lastLinkReply());
+                json(out, 200, new JSONObject().put("type", streamType(url)).put("url", proxied(url)).put("subtitles", subs));
                 return;
             }
             if (p.equals("/api/prefs")) { prefs(r, out); return; }
+            if (p.equals("/sub")) { subtitle(str(r.q.get("u")), out); return; }
             if (p.equals("/proxy")) { proxy(str(r.q.get("u")), r.headers.get("range"), out); return; }
             error(out, 404, "Not found");
         } catch (Portal.PortalException e) {
@@ -415,6 +417,31 @@ public class LocalServer {
             Log.d(TAG, "stream ended: " + e.getMessage());
         } finally {
             if (c != null) c.disconnect();
+        }
+    }
+
+    /** Fetches a subtitle file and serves it as WebVTT (SRT is converted). */
+    private void subtitle(String target, OutputStream out) throws IOException {
+        URL url;
+        try { url = new URL(target); } catch (IOException e) { error(out, 400, "Bad subtitle URL"); return; }
+        if (!portal.hosts.contains(url.getAuthority())) { error(out, 403, "Subtitle host not allowed"); return; }
+        HttpURLConnection c = (HttpURLConnection) url.openConnection();
+        c.setConnectTimeout(15000);
+        c.setReadTimeout(20000);
+        c.setRequestProperty("User-Agent", Portal.UA);
+        try {
+            if (c.getResponseCode() >= 400) { error(out, 502, "Subtitle server replied HTTP " + c.getResponseCode()); return; }
+            byte[] raw = readBytes(c.getInputStream());
+            if (raw.length > 5_000_000) { error(out, 413, "Subtitle file too large"); return; }
+            String text = new String(raw, "UTF-8");
+            if (text.startsWith("\uFEFF")) text = text.substring(1);
+            text = text.replace("\r\n", "\n").replace('\r', '\n');
+            if (!text.startsWith("WEBVTT")) {
+                text = "WEBVTT\n\n" + text.replaceAll("(\\d{1,2}:\\d{2}:\\d{2}),(\\d{3})", "$1.$2");
+            }
+            send(out, 200, "text/vtt; charset=utf-8", text.getBytes("UTF-8"));
+        } finally {
+            c.disconnect();
         }
     }
 

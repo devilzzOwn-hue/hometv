@@ -547,10 +547,49 @@ public class Portal {
     // ---------------------------------------------------------------- playback
     private static final String PREFIX = "^\\s*(ffmpeg|ffrt\\d*|auto)\\s+";
 
+    private final ThreadLocal<Object> lastLink = new ThreadLocal<>();
+
+    /** The portal's reply to the last successful create_link on this thread (holds subtitles, if any). */
+    public Object lastLinkReply() { return lastLink.get(); }
+
+    /** Subtitle tracks the portal attached to a create_link reply: [{url, lang, label}]. */
+    public JSONArray subtitles(Object reply) {
+        JSONArray out = new JSONArray();
+        if (!(reply instanceof JSONObject)) return out;
+        JSONArray subs = ((JSONObject) reply).optJSONArray("subtitles");
+        if (subs == null) return out;
+        for (int i = 0; i < subs.length() && i < 12; i++) {
+            Object o = subs.opt(i);
+            String url = "", lang = "", label = "";
+            if (o instanceof JSONObject) {
+                JSONObject j = (JSONObject) o;
+                url = j.optString("file", j.optString("url", j.optString("src", "")));
+                lang = j.optString("lang", j.optString("language", ""));
+                label = j.optString("label", j.optString("name", j.optString("title", "")));
+            } else if (o instanceof String) {
+                url = (String) o;
+            }
+            url = abs(url, false);
+            if (!url.startsWith("http")) continue;
+            try {
+                hosts.add(new URL(url).getAuthority());
+                out.put(new JSONObject().put("url", "/sub?u=" + enc(url)).put("lang", lang)
+                        .put("label", label.isEmpty() ? (lang.isEmpty() ? "Subtitles " + (i + 1) : lang.toUpperCase(Locale.US)) : label));
+            } catch (Exception ignored) { }
+        }
+        return out;
+    }
+
     private Object createLink(String kind, String cmd, String series) throws PortalException {
-        return call(map("type", "live".equals(kind) ? "itv" : "vod", "action", "create_link",
+        return callLink(kind, cmd, series);
+    }
+
+    private Object callLink(String kind, String cmd, String series) throws PortalException {
+        Object r = call(map("type", "live".equals(kind) ? "itv" : "vod", "action", "create_link",
                 "cmd", cmd, "series", series == null ? "" : series, "forced_storage", "undefined",
                 "disable_ad", "0", "download", "0", "JsHttpRequest", "1-xml"), 25000);
+        lastLink.set(r);
+        return r;
     }
 
     private static String extract(Object js) {
