@@ -37,6 +37,8 @@ public class Config {
         return !get("portal_url").isEmpty() && !get("mac").isEmpty();
     }
 
+    public String pin() { return sp.getString("parental_pin", ""); }
+
     public JSONObject toJson() throws JSONException {
         JSONObject o = new JSONObject();
         for (String k : KEYS) o.put(k, sp.getString(k, ""));
@@ -44,6 +46,7 @@ public class Config {
         o.put("timezone", get("timezone"));
         o.put("single_stream", singleStream());
         o.put("configured", isConfigured());
+        o.put("pin_set", !pin().isEmpty());
         return o;
     }
 
@@ -53,6 +56,8 @@ public class Config {
             if (o.has(k)) e.putString(k, o.optString(k, "").trim());
         }
         if (o.has("single_stream")) e.putBoolean("single_stream", o.optBoolean("single_stream", true));
+        String pin = o.optString("parental_pin", "").trim();
+        if (pin.matches("\\d{4,8}")) e.putString("parental_pin", pin);   // blank = keep the current PIN
         e.commit();
     }
 }

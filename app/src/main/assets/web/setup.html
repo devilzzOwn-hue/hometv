@@ -62,6 +62,8 @@ button:focus{outline:3px solid var(--focus);outline-offset:2px}
     <input name="device_id2" class="nav">
     <label>Time zone</label>
     <input name="timezone" class="nav" placeholder="America/Los_Angeles">
+    <label>Parental PIN <small id="pinNote">(4 digits, hides adult categories until entered; leave blank to keep the current PIN)</small></label>
+    <input name="parental_pin" class="nav" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="new-password" placeholder="••••">
     <label class="check"><input type="checkbox" name="single_stream" class="nav" checked> Only one stream at a time (protects a 1-screen plan)</label>
     <div class="btns">
       <button type="submit" class="primary nav" id="save">Save &amp; connect</button>
@@ -78,7 +80,8 @@ function status(msg,cls){ const s=$('#status'); s.textContent=msg; s.className=c
 async function load(){
   try{
     const r=await fetch('/api/config'); const c=await r.json();
-    for(const el of f.elements){ if(!el.name) continue; if(el.type==='checkbox') el.checked=!!c[el.name]; else if(c[el.name]) el.value=c[el.name]; }
+    for(const el of f.elements){ if(!el.name || el.name==='parental_pin') continue; if(el.type==='checkbox') el.checked=!!c[el.name]; else if(c[el.name]) el.value=c[el.name]; }
+    if(c.pin_set) $('#pinNote').textContent='(a PIN is set; type a new one to change it, or leave blank to keep it)';
     if(isTV && c.setup_url){ $('#setupUrl').textContent=c.setup_url; $('#phoneHint').hidden=false; }
     $('#cont').hidden=!isTV || !c.configured;
     return c;
@@ -88,6 +91,7 @@ f.addEventListener('submit',async e=>{
   e.preventDefault();
   const data={}; for(const el of f.elements){ if(!el.name) continue; data[el.name]= el.type==='checkbox'?el.checked:el.value.trim(); }
   if(!data.portal_url||!data.mac){ status('Portal URL and MAC address are required.','bad'); return; }
+  if(data.parental_pin && !/^\d{4,8}$/.test(data.parental_pin)){ status('The parental PIN must be 4 to 8 digits.','bad'); return; }
   status('Connecting to the portal…');
   try{
     const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});

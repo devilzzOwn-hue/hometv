@@ -165,6 +165,18 @@ aside::-webkit-scrollbar{display:none}
 .themeOpt.on{border-color:rgba(255,255,255,.5)}
 .themeOpt:focus{border-color:#fff;box-shadow:0 0 0 3px rgba(255,255,255,.25);transform:scale(1.04)}
 
+/* ---------- parental PIN keypad ---------- */
+#pinPanel{position:fixed;inset:0;z-index:31;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center}
+#pinPanel .box{background:#151922;border:1px solid rgba(255,255,255,.1);border-radius:1.2rem;padding:1.6rem 1.8rem;width:22rem;box-shadow:0 30px 80px rgba(0,0,0,.6);color:#f2f4f7;text-align:center}
+#pinPanel h2{margin:0 0 .3rem;font-size:1.3rem}#pinPanel p{margin:0 0 1rem;color:#9aa4b2;font-size:.85rem;min-height:1.2em}
+#pinPanel p.err{color:#ff8a80}
+#pinDots{display:flex;justify-content:center;gap:.8rem;margin:.4rem 0 1.2rem}
+#pinDots i{width:1rem;height:1rem;border-radius:50%;border:2px solid rgba(255,255,255,.5)}#pinDots i.f{background:#fff;border-color:#fff}
+.keys{display:grid;grid-template-columns:repeat(3,1fr);gap:.6rem}
+.key{padding:.8rem 0;border-radius:.8rem;border:0;background:rgba(255,255,255,.08);font-size:1.3rem;font-weight:700;cursor:pointer;color:#f2f4f7}
+.key:focus{background:#fff;color:#111;outline:none;transform:scale(1.06)}
+.cat.lock{margin-top:.4rem;color:#c9a7ff}
+
 /* ---------- player ---------- */
 #player{position:fixed;inset:0;background:#000;z-index:20}
 #video{width:100%;height:100%;background:#000;display:block}
@@ -271,6 +283,8 @@ video::cue{background:rgba(0,0,0,.65);color:#fff;font-size:2.2rem;line-height:1.
 <div id="toast"></div>
 <div id="themePanel" hidden><div class="box"><h2>Theme</h2><p>Pick a look. Your choice is remembered on this TV.</p><div class="themes" id="themeList"></div></div></div>
 <style id="themeStyle"></style>
+<div id="pinPanel" hidden><div class="box"><h2>🔒 Parental lock</h2><p id="pinMsg">Enter your PIN to show adult categories</p><div id="pinDots"></div>
+<div class="keys"><button class="key focusable" data-k="1">1</button><button class="key focusable" data-k="2">2</button><button class="key focusable" data-k="3">3</button><button class="key focusable" data-k="4">4</button><button class="key focusable" data-k="5">5</button><button class="key focusable" data-k="6">6</button><button class="key focusable" data-k="7">7</button><button class="key focusable" data-k="8">8</button><button class="key focusable" data-k="9">9</button><button class="key focusable" data-k="del">⌫</button><button class="key focusable" data-k="0">0</button><button class="key focusable" data-k="ok">OK</button></div></div></div>
 
 <script src="/static/vendor/mpegts.js"></script>
 <script src="/static/vendor/hls.min.js"></script>
@@ -340,7 +354,7 @@ function toggleVodFav(v){
   if(!v) return;
   const L=S.prefs.vod_favorites, i=L.findIndex(x=>vkey(x)===vkey(v));
   if(i>=0){ L.splice(i,1); toast('Removed from My List'); }
-  else { L.unshift({id:v.id, kind:v.kind||'vod', is_series:!!v.is_series, name:v.name, year:v.year, rating:v.rating, poster:v.poster, cmd:v.cmd, series:v.series||[], desc:String(v.desc||'').slice(0,400)}); toast('Added to My List'); }
+  else { L.unshift({id:v.id, kind:v.kind||'vod', is_series:!!v.is_series, adult:!!v.adult, name:v.name, year:v.year, rating:v.rating, poster:v.poster, cmd:v.cmd, series:v.series||[], desc:String(v.desc||'').slice(0,400)}); toast('Added to My List'); }
   savePrefs(); setStar(`.card[data-vk="${CSS.escape(vkey(v))}"]`, isVodFav(v)); afterListChange();
 }
 function afterListChange(){
@@ -564,6 +578,42 @@ $('#themeList').addEventListener('focusin',e=>{ const b=e.target.closest('.theme
 $('#themePanel').addEventListener('click',e=>{ if(e.target.id==='themePanel'){ applyTheme(getTheme()); closeThemes(); } });
 applyTheme(getTheme());
 
+/* ---------- parental lock ---------- */
+S.parental={locked:true, pin_set:false};
+function lockEntry(){ return `<div class="cat-sep"></div><button class="cat lock focusable" data-cat="__lock"><span>${S.parental.locked?'🔒 Show adult categories':'🔓 Hide adult categories'}</span></button>`; }
+async function refreshParental(){ try{ S.parental=await api('/api/parental'); }catch(e){} }
+let pinBuf='';
+function pinDots(){ $('#pinDots').innerHTML=[0,1,2,3].map(i=>`<i class="${i<pinBuf.length?'f':''}"></i>`).join(''); }
+function openPin(){
+  pinBuf=''; pinDots();
+  $('#pinMsg').className=''; $('#pinMsg').textContent=S.parental.pin_set?'Enter your PIN to show adult categories':'No PIN set yet. Add one in ⚙ Settings → Parental PIN.';
+  S.pinReturn=document.activeElement; $('#pinPanel').hidden=false; $('#pinPanel .key[data-k="1"]').focus();
+}
+function closePin(){ $('#pinPanel').hidden=true; const f=S.pinReturn; if(f && document.body.contains(f)) f.focus(); }
+async function submitPin(){
+  try{
+    S.parental=await api('/api/parental',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'unlock',pin:pinBuf})});
+    closePin(); toast('Adult categories shown for up to 3 hours'); await reloadAfterLock();
+  }catch(e){ pinBuf=''; pinDots(); $('#pinMsg').className='err'; $('#pinMsg').textContent=e.message; }
+}
+async function lockNow(silent){
+  try{ S.parental=await api('/api/parental',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'lock'})}); }catch(e){}
+  if(!silent){ toast('Adult categories hidden'); await reloadAfterLock(); }
+}
+async function reloadAfterLock(){
+  S.homePlan=null; S.homeData.clear(); S.vod.items=[]; S.vod.cats=null; S.seriesCats=null; S.vod.cat='*'; S.cat='all';
+  await loadLive(true);
+  if(S.view==='vod') initVod(); else loadHomeVod();
+}
+$('#pinPanel').addEventListener('click',e=>{
+  const k=e.target.closest('.key'); if(!k){ if(e.target.id==='pinPanel') closePin(); return; }
+  const v=k.dataset.k;
+  if(v==='del') pinBuf=pinBuf.slice(0,-1);
+  else if(v==='ok'){ if(pinBuf.length>=4) submitPin(); return; }
+  else if(pinBuf.length<8){ pinBuf+=v; }
+  pinDots(); if(pinBuf.length===4 && S.parental.pin_set) setTimeout(submitPin,150);
+});
+
 /* ---------- views ---------- */
 function showView(v){
   S.view=v; S.sub=null;
@@ -615,7 +665,7 @@ function liveCats(){
   ];
   $('#cats').innerHTML=items.map(it=>it
     ?`<button class="cat focusable${S.cat===it[0]&&!S.query?' active':''}" data-cat="${esc(it[0])}"><span>${esc(it[1])}</span><span class="n">${it[2]}</span></button>`
-    :'<div class="cat-sep"></div>').join('');
+    :'<div class="cat-sep"></div>').join('')+lockEntry();
 }
 function searchChannels(q){
   const nq=norm(q); if(!nq) return [];
@@ -664,7 +714,7 @@ async function initVod(){
 }
 function vodCats(){
   const items=[['fav','★ My movies & shows',S.prefs.vod_favorites.length],['*','All',''],...(S.vod.cats||[]).filter(c=>c.id!=='*').map(c=>[c.id,c.title,''])];
-  $('#cats').innerHTML=items.map(([id,t,n],i)=>`<button class="cat focusable${S.vod.cat===id&&!S.query?' active':''}" data-cat="${esc(id)}"><span>${esc(t)}</span><span class="n">${n}</span></button>`+(i===0?'<div class="cat-sep"></div>':'')).join('');
+  $('#cats').innerHTML=items.map(([id,t,n],i)=>`<button class="cat focusable${S.vod.cat===id&&!S.query?' active':''}" data-cat="${esc(id)}"><span>${esc(t)}</span><span class="n">${n}</span></button>`+(i===0?'<div class="cat-sep"></div>':'')).join('')+lockEntry();
 }
 function vodHeading(){
   const V=S.vod, c=(V.cats||[]).find(c=>c.id===V.cat);
@@ -931,7 +981,7 @@ $('#nextBtn').onclick=()=>zap(1);
 $('#favBtn').onclick=()=>{ if(!S.cur) return; if(S.cur.kind==='live') toggleFav(S.cur.ch.id); else toggleVodFav(S.cur.v); renderOSD(); if(S.cur.kind==='live') loadEPG(S.cur.ch); };
 
 /* ---------- remote-control navigation ---------- */
-function focusables(scope){ if(!scope && !$('#themePanel').hidden) scope=$('#themePanel'); return [...(scope||document).querySelectorAll(scope&&scope.id==='osd'?'.pbtn':'.focusable')].filter(e=>e.offsetParent!==null && !e.closest('[hidden]') && !e.hidden); }
+function focusables(scope){ if(!scope && !$('#pinPanel').hidden) scope=$('#pinPanel'); if(!scope && !$('#themePanel').hidden) scope=$('#themePanel'); return [...(scope||document).querySelectorAll(scope&&scope.id==='osd'?'.pbtn':'.focusable')].filter(e=>e.offsetParent!==null && !e.closest('[hidden]') && !e.hidden); }
 function move(dir, scope){
   const list=focusables(scope), a=document.activeElement;
   if(!a || !list.includes(a)){ (list.find(e=>e.classList.contains('card'))||list[0])?.focus(); return; }
@@ -968,6 +1018,7 @@ function favCard(c){
   return false;
 }
 function hometvBack(){
+  if(!$('#pinPanel').hidden){ closePin(); return true; }
   if(!$('#themePanel').hidden){ applyTheme(getTheme()); closeThemes(); return true; }
   if(!$('#player').hidden){ closePlayer(); return true; }
   if(document.activeElement===$('#q')){ if($('#q').value){ $('#q').value=''; onSearch(); } else $('#q').blur(); focusFirst(S.view==='home'?'#rows .card':'#grid .card'); return true; }
@@ -979,6 +1030,7 @@ function hometvBack(){
   return false;
 }
 function hometvMenu(){
+  if(!$('#pinPanel').hidden) return true;
   if(!$('#themePanel').hidden) return true;
   if(!$('#player').hidden){ $('#favBtn').click(); return true; }
   const c=document.activeElement && document.activeElement.closest && document.activeElement.closest('.card');
@@ -987,12 +1039,14 @@ function hometvMenu(){
   return false;
 }
 function hometvZap(d){ if(!$('#player').hidden && S.cur && S.cur.kind==='live'){ showOSD(); zap(d); } }
-function hometvPause(){ if(!$('#player').hidden) closePlayer(); }
+function hometvPause(){ if(!$('#player').hidden) closePlayer(); if(!S.parental.locked){ S.parental.locked=true; lockNow(true).then(reloadAfterLock); } }
 
 /* Hold OK on a tile = add/remove from My List; short press = open. */
 const hold={el:null, t:null, done:false};
 document.addEventListener('keydown',e=>{
   const k=e.key, inInput=document.activeElement===$('#q');
+  if(!$('#pinPanel').hidden && /^[0-9]$/.test(k)){ e.preventDefault(); const b=$(`#pinPanel .key[data-k="${k}"]`); if(b) b.click(); return; }
+  if(!$('#pinPanel').hidden && k==='Backspace'){ e.preventDefault(); $('#pinPanel .key[data-k="del"]').click(); return; }
   if(isBack(e) || (k==='Backspace' && !inInput)){ e.preventDefault(); hometvBack(); return; }
   if(isFavKey(e) && !inInput){ e.preventDefault(); hometvMenu(); return; }
   if(!$('#player').hidden){
@@ -1064,6 +1118,7 @@ function onSearch(){
 $('#q').addEventListener('input',()=>{ clearTimeout(qT); qT=setTimeout(onSearch, 700); });
 $('#cats').addEventListener('click',e=>{
   const b=e.target.closest('.cat'); if(!b) return;
+  if(b.dataset.cat==='__lock'){ if(S.parental.locked) openPin(); else lockNow(); return; }
   S.sub=null;
   if(S.view==='live'){ S.cat=b.dataset.cat; renderLive(); } else { S.vod.cat=b.dataset.cat; loadVod(true); }
 });
@@ -1089,6 +1144,7 @@ setInterval(()=>{ if(S.view==='home' && $('#player').hidden && S.heroItem && S.h
 $('#setBtn').onclick=()=>{ location.href='/setup'; };
 (async()=>{
   try{ const c=await api('/api/config'); $('#setBtn').hidden=false; if(!c.configured){ location.replace('/setup'); return; } }catch(e){}
+  await refreshParental();
   try{ const p=await api('/api/prefs'); for(const k of ['favorites','recent','vod_favorites']) if(Array.isArray(p[k])) S.prefs[k]=p[k]; }catch(e){}
   await loadLive();
   focusFirst('#rows .card');

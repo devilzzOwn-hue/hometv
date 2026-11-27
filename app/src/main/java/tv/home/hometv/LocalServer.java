@@ -53,6 +53,18 @@ public class LocalServer {
     private final Object prefsLock = new Object();
     private ServerSocket ss;
 
+    // ---- parental lock: adult content hidden unless unlocked with the PIN (for up to 3 hours) ----
+    private volatile long unlockedUntil = 0;
+    private int badPins = 0;
+    private long pinBlockedUntil = 0;
+    private boolean locked() { return System.currentTimeMillis() > unlockedUntil; }
+
+    private static JSONArray withoutAdult(JSONArray a) {
+        JSONArray o = new JSONArray();
+        if (a != null) for (int i = 0; i < a.length(); i++) { JSONObject x = a.optJSONObject(i); if (x != null && !x.optBoolean("adult")) o.put(x); }
+        return o;
+    }
+
     public LocalServer(Context ctx, int port) {
         this.ctx = ctx.getApplicationContext();
         this.port = port;
@@ -219,19 +231,46 @@ public class LocalServer {
                 send(out, 200, "text/plain; charset=utf-8", body.getBytes("UTF-8"));
                 return;
             }
-            if (p.equals("/api/live")) { json(out, 200, portal.liveListing("1".equals(r.q.get("refresh")))); return; }
+            if (p.equals("/api/live")) {
+                JSONObject live = portal.liveListing("1".equals(r.q.get("refresh")));
+                if (locked()) live = new JSONObject().put("genres", withoutAdult(live.optJSONArray("genres")))
+                        .put("channels", withoutAdult(live.optJSONArray("channels"))).put("loaded_at", live.opt("loaded_at"));
+                json(out, 200, live);
+                return;
+            }
+            if (p.equals("/api/parental")) { parental(r, out); return; }
             if (p.equals("/api/epg")) { json(out, 200, new JSONObject().put("programs", portal.epg(str(r.q.get("id"))))); return; }
-            if (p.equals("/api/vod/categories")) { json(out, 200, new JSONObject().put("categories", portal.categories(str(r.q.get("module"))))); return; }
+            if (p.equals("/api/vod/categories")) {
+                JSONArray cats = portal.categories(str(r.q.get("module")));
+                json(out, 200, new JSONObject().put("categories", locked() ? withoutAdult(cats) : cats));
+                return;
+            }
             if (p.equals("/api/vod/list")) {
                 int page = 1;
                 try { page = Math.max(1, Integer.parseInt(str(r.q.get("page")))); } catch (NumberFormatException ignored) { }
-                String module = str(r.q.get("module"));
-                if ("series".equals(module)) json(out, 200, portal.moduleList("series", str(r.q.get("category")), page));
-                else json(out, 200, portal.vodList(str(r.q.get("category")), page, str(r.q.get("search")).trim()));
+                String module = "series".equals(str(r.q.get("module"))) ? "series" : "vod";
+                String cat = str(r.q.get("category"));
+                if (locked() && portal.isAdultCategory(module, cat)) { error(out, 403, "This category is locked."); return; }
+                JSONObject res = "series".equals(module) ? portal.moduleList("series", cat, page)
+                        : portal.vodList(cat, page, str(r.q.get("search")).trim());
+                if (locked()) res.put("items", withoutAdult(res.optJSONArray("items")));
+                json(out, 200, res);
                 return;
             }
-            if (p.equals("/api/search")) { json(out, 200, portal.search(str(r.q.get("q")).trim())); return; }
+            if (p.equals("/api/search")) {
+                JSONObject res = portal.search(str(r.q.get("q")).trim());
+                if (locked()) res = new JSONObject(res.toString()).put("items", withoutAdult(res.optJSONArray("items")));
+                json(out, 200, res);
+                return;
+            }
             if (p.equals("/api/seasons")) { json(out, 200, new JSONObject().put("seasons", portal.seasons(str(r.q.get("id")), str(r.q.get("module"))))); return; }
+            if (p.equals("/api/play") && locked() && "live".equals(str(r.q.get("kind")))) {
+                JSONArray chs = portal.liveListing(false).optJSONArray("channels");
+                for (int i = 0; chs != null && i < chs.length(); i++) {
+                    JSONObject c = chs.optJSONObject(i);
+                    if (c != null && c.optString("id").equals(str(r.q.get("id"))) && c.optBoolean("adult")) { error(out, 403, "This channel is locked."); return; }
+                }
+            }
             if (p.equals("/api/play")) {
                 String url = "live".equals(str(r.q.get("kind")))
                         ? portal.link("live", portal.cmdFor(str(r.q.get("id"))), "", "")
@@ -288,6 +327,12 @@ public class LocalServer {
                     JSONObject o = inVf.optJSONObject(i);
                     if (o != null) vf.put(o);
                 }
+                if (locked() && prefsFile.exists()) {   // keep adult favourites the TV couldn't see while locked
+                    try {
+                        JSONArray old = new JSONObject(new String(readBytes(new FileInputStream(prefsFile)), "UTF-8")).optJSONArray("vod_favorites");
+                        for (int i = 0; old != null && i < old.length(); i++) { JSONObject o = old.optJSONObject(i); if (o != null && o.optBoolean("adult")) vf.put(o); }
+                    } catch (JSONException ignored) { }
+                }
                 JSONObject clean = new JSONObject()
                         .put("favorites", limit(in.optJSONArray("favorites"), 2000))
                         .put("recent", limit(in.optJSONArray("recent"), 50))
@@ -306,8 +351,30 @@ public class LocalServer {
             json(out, 200, new JSONObject()
                     .put("favorites", p.optJSONArray("favorites") != null ? p.optJSONArray("favorites") : new JSONArray())
                     .put("recent", p.optJSONArray("recent") != null ? p.optJSONArray("recent") : new JSONArray())
-                    .put("vod_favorites", p.optJSONArray("vod_favorites") != null ? p.optJSONArray("vod_favorites") : new JSONArray()));
+                    .put("vod_favorites", p.optJSONArray("vod_favorites") == null ? new JSONArray()
+                            : (locked() ? withoutAdult(p.optJSONArray("vod_favorites")) : p.optJSONArray("vod_favorites"))));
         }
+    }
+
+    private void parental(Req r, OutputStream out) throws IOException, JSONException {
+        if ("POST".equals(r.method)) {
+            JSONObject in;
+            try { in = new JSONObject(new String(r.body, "UTF-8")); } catch (JSONException e) { error(out, 400, "Bad request"); return; }
+            if ("lock".equals(in.optString("action"))) { unlockedUntil = 0; }
+            else if ("unlock".equals(in.optString("action"))) {
+                long now = System.currentTimeMillis();
+                if (cfg.pin().isEmpty()) { error(out, 400, "No PIN set yet. Add one under Settings → Parental PIN."); return; }
+                if (now < pinBlockedUntil) { error(out, 429, "Too many wrong PINs. Try again in a minute."); return; }
+                if (!cfg.pin().equals(in.optString("pin"))) {
+                    if (++badPins >= 5) { badPins = 0; pinBlockedUntil = now + 60_000; }
+                    error(out, 403, "Wrong PIN.");
+                    return;
+                }
+                badPins = 0;
+                unlockedUntil = now + 3L * 3600 * 1000;
+            }
+        }
+        json(out, 200, new JSONObject().put("locked", locked()).put("pin_set", !cfg.pin().isEmpty()));
     }
 
     private static JSONArray limit(JSONArray a, int max) {

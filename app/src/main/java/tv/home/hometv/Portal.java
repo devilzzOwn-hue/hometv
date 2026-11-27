@@ -45,6 +45,23 @@ public class Portal {
 
     public Portal(Config cfg) { this.cfg = cfg; }
 
+    /** Category / title names that indicate adult content. */
+    static final java.util.regex.Pattern ADULT = java.util.regex.Pattern.compile(
+            "(?i)(\\badult|\\bxxx\\b|porn|\\b18\\s*\\+|\\+\\s*18\\b|\\bfor\\s+adults\\b|erotic|\\bx-?rated\\b|playboy|brazzers|hustler|\\bnsfw\\b|\\bsexy?\\b|after\\s*dark|\\bhot\\s+(movies|videos|clips)\\b|\\bblue\\s+films?\\b)");
+    static boolean adultName(String s) { return s != null && ADULT.matcher(s).find(); }
+    private static boolean censored(JSONObject o) {
+        String c = o.optString("censored", "0");
+        return "1".equals(c) || "true".equalsIgnoreCase(c);
+    }
+    /** Adult category ids per module ("vod", "series"), learned when categories are listed. */
+    private final Map<String, Set<String>> adultCats = new HashMap<>();
+    public boolean isAdultCategory(String module, String id) {
+        Set<String> s;
+        synchronized (adultCats) { s = adultCats.get(module); }
+        if (s == null) { try { categories(module); } catch (PortalException ignored) { } synchronized (adultCats) { s = adultCats.get(module); } }
+        return s != null && s.contains(id);
+    }
+
     /** Recent portal requests and replies, shown on the /debug page (MAC address never included). */
     private final java.util.LinkedList<String> log = new java.util.LinkedList<>();
     private static final String[] LOG_KEYS = {"type", "action", "cmd", "series", "movie_id", "season_id", "category", "search", "ch_id", "p"};
@@ -266,7 +283,8 @@ public class Portal {
                 for (int i = 0; i < ga.length(); i++) {
                     JSONObject o = ga.optJSONObject(i);
                     if (o == null || "*".equals(o.optString("id"))) continue;
-                    genres.put(new JSONObject().put("id", o.optString("id")).put("title", o.optString("title")));
+                    genres.put(new JSONObject().put("id", o.optString("id")).put("title", o.optString("title"))
+                            .put("adult", adultName(o.optString("title")) || censored(o)));
                 }
             }
             List<JSONObject> data = new ArrayList<>();
@@ -280,6 +298,8 @@ public class Portal {
             if (data.isEmpty()) data = paged(map("type", "itv", "action", "get_ordered_list",
                     "genre", "*", "fav", "0", "sortby", "number"));
 
+            Set<String> adultGenres = new HashSet<>();
+            for (int i = 0; i < genres.length(); i++) if (genres.getJSONObject(i).optBoolean("adult")) adultGenres.add(genres.getJSONObject(i).optString("id"));
             Map<String, String> cmds = new HashMap<>();
             List<JSONObject> channels = new ArrayList<>();
             for (JSONObject ch : data) {
@@ -292,7 +312,8 @@ public class Portal {
                 cmds.put(id, cmd);
                 channels.add(new JSONObject().put("id", id).put("name", ch.optString("name").trim())
                         .put("number", num).put("logo", abs(ch.optString("logo", ""), true))
-                        .put("genre", ch.optString("tv_genre_id", "")));
+                        .put("genre", ch.optString("tv_genre_id", ""))
+                        .put("adult", censored(ch) || adultGenres.contains(ch.optString("tv_genre_id", "")) || adultName(ch.optString("name"))));
             }
             Collections.sort(channels, new Comparator<JSONObject>() {
                 @Override public int compare(JSONObject a, JSONObject b) {
@@ -343,16 +364,22 @@ public class Portal {
     public JSONArray vodCategories() throws PortalException { return categories("vod"); }
 
     public JSONArray categories(String module) throws PortalException {
-        Object js = call(map("type", "series".equals(module) ? "series" : "vod", "action", "get_categories"), 20000);
+        String mod = "series".equals(module) ? "series" : "vod";
+        Object js = call(map("type", mod, "action", "get_categories"), 20000);
         JSONArray out = new JSONArray();
-        if (!(js instanceof JSONArray)) return out;
-        JSONArray a = (JSONArray) js;
-        for (int i = 0; i < a.length(); i++) {
-            JSONObject c = a.optJSONObject(i);
-            if (c == null) continue;
-            try { out.put(new JSONObject().put("id", c.optString("id")).put("title", c.optString("title"))); }
-            catch (JSONException ignored) { }
+        Set<String> adult = new HashSet<>();
+        if (js instanceof JSONArray) {
+            JSONArray a = (JSONArray) js;
+            for (int i = 0; i < a.length(); i++) {
+                JSONObject c = a.optJSONObject(i);
+                if (c == null) continue;
+                boolean ad = adultName(c.optString("title")) || censored(c);
+                if (ad) adult.add(c.optString("id"));
+                try { out.put(new JSONObject().put("id", c.optString("id")).put("title", c.optString("title")).put("adult", ad)); }
+                catch (JSONException ignored) { }
+            }
         }
+        synchronized (adultCats) { adultCats.put(mod, adult); }
         return out;
     }
 
@@ -372,8 +399,12 @@ public class Portal {
             if (poster.isEmpty() || "null".equals(poster)) poster = v.optString("cover_big", v.optString("cover", ""));
             boolean isSeries = "series".equals(module) || "1".equals(v.optString("is_series", "0"))
                     || "true".equals(v.optString("is_series", ""));
+            Set<String> adultIds;
+            synchronized (adultCats) { adultIds = adultCats.get(module); }
+            boolean adult = censored(v) || adultName(v.optString("name"))
+                    || (adultIds != null && adultIds.contains(v.optString("category_id", "")));
             items.put(new JSONObject().put("id", v.optString("id")).put("name", v.optString("name"))
-                    .put("kind", module).put("is_series", isSeries && series.length() == 0)
+                    .put("kind", module).put("is_series", isSeries && series.length() == 0).put("adult", adult)
                     .put("year", "null".equals(year) ? "" : year)
                     .put("rating", "null".equals(rating) ? "" : rating)
                     .put("desc", v.optString("description", ""))
