@@ -221,11 +221,13 @@ public class LocalServer {
             }
             if (p.equals("/api/live")) { json(out, 200, portal.liveListing("1".equals(r.q.get("refresh")))); return; }
             if (p.equals("/api/epg")) { json(out, 200, new JSONObject().put("programs", portal.epg(str(r.q.get("id"))))); return; }
-            if (p.equals("/api/vod/categories")) { json(out, 200, new JSONObject().put("categories", portal.vodCategories())); return; }
+            if (p.equals("/api/vod/categories")) { json(out, 200, new JSONObject().put("categories", portal.categories(str(r.q.get("module"))))); return; }
             if (p.equals("/api/vod/list")) {
                 int page = 1;
                 try { page = Math.max(1, Integer.parseInt(str(r.q.get("page")))); } catch (NumberFormatException ignored) { }
-                json(out, 200, portal.vodList(str(r.q.get("category")), page, str(r.q.get("search")).trim()));
+                String module = str(r.q.get("module"));
+                if ("series".equals(module)) json(out, 200, portal.moduleList("series", str(r.q.get("category")), page));
+                else json(out, 200, portal.vodList(str(r.q.get("category")), page, str(r.q.get("search")).trim()));
                 return;
             }
             if (p.equals("/api/search")) { json(out, 200, portal.search(str(r.q.get("q")).trim())); return; }

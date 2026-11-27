@@ -40,7 +40,7 @@ main{position:relative;z-index:2;height:calc(100vh - 4.2rem)}
 
 /* ---------- hero banner ---------- */
 #homeView{display:flex;flex-direction:column}
-#hero{position:relative;flex:none;height:44vh;padding:1.2rem 2.6rem 0;display:flex}
+#hero{position:relative;flex:none;min-height:44vh;padding:1.2rem 2.6rem 0;display:flex}
 #heroArt{position:absolute;right:0;top:-4.2rem;width:58%;height:calc(100% + 4.2rem);overflow:hidden;
   -webkit-mask-image:linear-gradient(90deg,transparent 0%,#000 38%),linear-gradient(0deg,transparent 0%,#000 30%);-webkit-mask-composite:source-in;
   mask-image:linear-gradient(90deg,transparent 0%,#000 38%);}
@@ -51,12 +51,12 @@ main{position:relative;z-index:2;height:calc(100vh - 4.2rem)}
 .heroInfo{position:relative;z-index:2;width:48%;display:flex;flex-direction:column;justify-content:flex-end;padding-bottom:1rem}
 .hTag{font-size:.8rem;font-weight:800;letter-spacing:.18em;color:var(--accent);text-transform:uppercase;margin-bottom:.6rem;display:flex;align-items:center;gap:.5rem}
 .hTag .dot{width:.55rem;height:.55rem;border-radius:50%;background:var(--live);box-shadow:0 0 10px var(--live)}
-.hTitle{font-size:2.8rem;line-height:1.02;font-weight:900;letter-spacing:-.03em;margin:0 0 .7rem;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-shadow:0 4px 30px rgba(0,0,0,.5)}
+.hTitle{font-size:2.5rem;line-height:1.14;padding-bottom:.12em;font-weight:900;letter-spacing:-.03em;margin:0 0 .7rem;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-shadow:0 4px 30px rgba(0,0,0,.5)}
 .hMeta{display:flex;flex-wrap:wrap;gap:.45rem;align-items:center;font-size:.9rem;color:#d7dce3;margin-bottom:.7rem}
 .chip{border:1.5px solid rgba(255,255,255,.35);border-radius:.35rem;padding:.05rem .5rem;font-size:.75rem;font-weight:700;letter-spacing:.03em;color:#eef1f5;white-space:nowrap}
 .chip.q{background:var(--accent);border-color:var(--accent);color:#14100a}
 .chip.l{background:rgba(255,255,255,.14);border-color:transparent}
-.hDesc{font-size:.95rem;line-height:1.45;color:#c9d0d9;margin:0 0 1rem;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:1.4em}
+.hDesc{font-size:.95rem;line-height:1.5;padding-bottom:.15em;color:#c9d0d9;margin:0 0 1rem;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:1.4em}
 .hBtns{display:flex;gap:.7rem}
 .hbtn{border:0;border-radius:.6rem;padding:.65rem 1.4rem;font-weight:700;background:rgba(255,255,255,.16);cursor:pointer}
 .hbtn.pr{background:#fff;color:#0b0d12}
@@ -80,8 +80,8 @@ main{position:relative;z-index:2;height:calc(100vh - 4.2rem)}
 .card:focus .sheen{animation:sheen .9s ease-out .05s 1 both}
 @keyframes sheen{from{transform:translateX(-120%)}to{transform:translateX(120%)}}
 .card .cap{margin-top:.7rem;transition:transform .28s,color .2s;color:rgba(255,255,255,.72);max-width:100%}
-.card .cap b{display:block;font-weight:600;font-size:.88rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.card .cap small{display:block;font-size:.74rem;color:rgba(255,255,255,.5);margin-top:.15rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card .cap b{display:block;font-weight:600;font-size:.88rem;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card .cap small{display:block;font-size:.74rem;line-height:1.3;color:rgba(255,255,255,.5);margin-top:.15rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .card:focus .cap{color:#fff;transform:translateY(.5rem)}
 .star{position:absolute;top:.5rem;right:.6rem;color:var(--accent);font-size:1rem;text-shadow:0 2px 8px rgba(0,0,0,.7);z-index:2}
 
@@ -418,34 +418,77 @@ $('#hPlay').onclick=()=>{ const h=S.heroItem; if(!h) return; if(h.type==='live')
 $('#hFav').onclick=()=>{ const h=S.heroItem; if(!h) return; if(h.type==='live') toggleFav(h.c.id); else toggleVodFav(h.v); };
 
 /* ---------- Home rows ---------- */
+/* Home row order: Hindi TV shows, Hindi web series, Hindi movies, Hindi shows, Sports, My List rows, everything else. */
+const HOME_PRIORITY=[
+  {re:/hindi.*(tv\s*shows?|serials?|daily|tv\s*series)|(tv\s*shows?|serials?).*hindi/i, fallLive:/hindi.*(entertain|general|gec)/i},
+  {re:/hindi.*web\s*series|web\s*series.*hindi/i},
+  {re:/hindi.*(movies?|films?|cinema)|(movies?|films?|cinema).*hindi/i},
+  {re:/hindi.*shows?|shows?.*hindi/i},
+];
+const SPORTS_RE=/sport|cricket|ipl|football|soccer|nfl|nba|tennis|golf|f1|racing|wwe|ufc/i;
+S.homePlan=null; S.homeData=new Map(); S.seriesCats=null;
+function buildHomePlan(){
+  const used=new Set(), plan={top:[], sports:null, rest:[]};
+  const L=S.live, counts={}; L.channels.forEach(c=>counts[c.genre]=(counts[c.genre]||0)+1);
+  const liveG=L.genres.filter(g=>counts[g.id]).map(g=>({kind:'live', id:g.id, title:g.title}));
+  const vodC=(S.vod.cats||[]).filter(c=>c.id!=='*').map(c=>({kind:'vod', module:'vod', id:c.id, title:c.title}));
+  const serC=(S.seriesCats||[]).filter(c=>c.id!=='*').map(c=>({kind:'vod', module:'series', id:c.id, title:c.title}));
+  const key=x=>x.kind+':'+(x.module||'')+':'+x.id;
+  const pick=(re, pools)=>{ for(const pool of pools) for(const x of pool) if(!used.has(key(x)) && re.test(x.title)){ used.add(key(x)); return x; } return null; };
+  for(const pr of HOME_PRIORITY){
+    let x=pick(pr.re,[serC,vodC,liveG]);
+    if(!x && pr.fallLive) x=pick(pr.fallLive,[liveG]);
+    if(x) plan.top.push(x);
+  }
+  const sportsG=liveG.filter(g=>!used.has(key(g)) && SPORTS_RE.test(g.title));
+  if(sportsG.length){ sportsG.forEach(g=>used.add(key(g))); plan.sports={kind:'sports', ids:sportsG.map(g=>g.id)}; }
+  plan.rest=[...liveG.filter(g=>!used.has(key(g))).slice(0,4), ...vodC.filter(c=>!used.has(key(c))).slice(0,2)];
+  S.homePlan=plan;
+  [...plan.top, ...plan.rest].filter(x=>x.kind==='vod').forEach(loadHomeRow);
+}
+function loadHomeRow(x){
+  const k=x.module+':'+x.id; if(S.homeData.has(k)) return;
+  S.homeData.set(k,{loading:true});
+  api('/api/vod/list?'+new URLSearchParams({module:x.module, category:x.id, page:1, search:''}))
+    .then(d=>{ S.homeData.set(k,{items:d.items.slice(0,24), total:d.total}); if(S.view==='home') renderHome(); })
+    .catch(()=>S.homeData.set(k,{items:[], total:0}));
+}
+function planRow(x){
+  if(x.kind==='live'){ const list=S.live.channels.filter(c=>c.genre===x.id); return rowHTML(x.title, list.slice(0,24), 'chan', `${list.length} channels`); }
+  const d=S.homeData.get(x.module+':'+x.id);
+  if(!d || d.loading) return `<div class="row"><h3>${esc(x.title)}<small>loading…</small></h3><div class="strip" style="height:17rem"></div></div>`;
+  return rowHTML(x.title, d.items, 'vod', d.total?`${d.total} titles`:'');
+}
 function rowHTML(title, items, kind, sub){
   if(!items.length) return '';
   return `<div class="row"><h3>${esc(title)}${sub?`<small>${esc(sub)}</small>`:''}</h3><div class="strip">${items.map(x=>kind==='chan'?chanCard(x):vodCard(x)).join('')}</div></div>`;
 }
-let homeVod=[];
 async function renderHome(){
   if(!S.live) return;
-  const L=S.live, fav=S.prefs.favorites.map(id=>S.byId.get(id)).filter(Boolean);
+  if(!S.homePlan) buildHomePlan();
+  const P=S.homePlan;
+  const fav=S.prefs.favorites.map(id=>S.byId.get(id)).filter(Boolean);
   const recent=S.prefs.recent.map(id=>S.byId.get(id)).filter(Boolean).filter(c=>!isFav(c.id)).slice(0,20);
-  let h=rowHTML('My channels', fav, 'chan') + rowHTML('Recently watched', recent, 'chan') + rowHTML('My movies & shows', S.prefs.vod_favorites, 'vod');
-  const counts={}; L.channels.forEach(c=>counts[c.genre]=(counts[c.genre]||0)+1);
-  const gs=L.genres.filter(g=>counts[g.id]).slice(0,5);
-  for(const g of gs){ const list=L.channels.filter(c=>c.genre===g.id); h+=rowHTML(g.title, list.slice(0,24), 'chan', `${list.length} channels`); }
-  h+=homeVod.map(r=>rowHTML(r.title, r.items, 'vod', r.total?`${r.total} titles`:'')).join('');
+  let h=P.top.map(planRow).join('');
+  if(P.sports){ const sp=S.live.channels.filter(c=>P.sports.ids.includes(c.genre)); h+=rowHTML('Sports', sp.slice(0,30), 'chan', `${sp.length} channels`); }
+  h+=rowHTML('My channels', fav, 'chan') + rowHTML('Recently watched', recent, 'chan') + rowHTML('My movies & shows', S.prefs.vod_favorites, 'vod');
+  h+=P.rest.map(planRow).join('');
   if(!h) h='<div class="empty" style="padding:2rem 2.6rem">No channels yet.</div>';
   const keep=document.activeElement && document.activeElement.closest && document.activeElement.closest('#rows .card');
   const keepSel=keep?(keep.dataset.id?`#rows .card[data-id="${CSS.escape(keep.dataset.id)}"]`:`#rows .card[data-vk="${CSS.escape(keep.dataset.vk)}"]`):null;
+  const st=$('#rows').scrollTop;
   $('#rows').innerHTML=h;
   [...fav, ...recent].slice(0,24).forEach(c=>wantEPG(c.id));
-  if(keepSel && S.view==='home' && $('#player').hidden){ const el=document.querySelector(keepSel); if(el) el.focus({preventScroll:true}); }
+  if(keepSel && S.view==='home' && $('#player').hidden){ const el=document.querySelector(keepSel); if(el){ el.focus({preventScroll:true}); $('#rows').scrollTop=st; const strip=el.closest('.strip'); if(strip) strip.scrollLeft=Math.max(0, el.offsetLeft-strip.offsetLeft-40); } }
   if(!S.heroItem){ const first=$('#rows .card'); if(first) setHero(first); }
 }
 async function loadHomeVod(){
   try{
-    const cats=S.vod.cats||(await api('/api/vod/categories')).categories; S.vod.cats=cats;
-    const pick=cats.filter(c=>c.id!=='*').slice(0,3);
-    const res=await Promise.all(pick.map(c=>api('/api/vod/list?'+new URLSearchParams({category:c.id,page:1,search:''})).then(d=>({title:c.title,items:d.items.slice(0,20),total:d.total})).catch(()=>null)));
-    homeVod=res.filter(r=>r&&r.items.length);
+    const [v, se]=await Promise.all([
+      S.vod.cats?Promise.resolve({categories:S.vod.cats}):api('/api/vod/categories?module=vod').catch(()=>({categories:[]})),
+      api('/api/vod/categories?module=series').catch(()=>({categories:[]}))]);
+    S.vod.cats=v.categories; S.seriesCats=se.categories;
+    S.homePlan=null;
     if(S.view==='home') renderHome();
   }catch(e){}
 }

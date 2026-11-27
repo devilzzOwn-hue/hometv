@@ -340,8 +340,10 @@ public class Portal {
     }
 
     // ---------------------------------------------------------------- movies & series
-    public JSONArray vodCategories() throws PortalException {
-        Object js = call(map("type", "vod", "action", "get_categories"), 20000);
+    public JSONArray vodCategories() throws PortalException { return categories("vod"); }
+
+    public JSONArray categories(String module) throws PortalException {
+        Object js = call(map("type", "series".equals(module) ? "series" : "vod", "action", "get_categories"), 20000);
         JSONArray out = new JSONArray();
         if (!(js instanceof JSONArray)) return out;
         JSONArray a = (JSONArray) js;
@@ -401,6 +403,10 @@ public class Portal {
 
     public JSONObject vodList(String category, int page, String search) throws PortalException {
         return list("vod", category, page, search);
+    }
+
+    public JSONObject moduleList(String module, String category, int page) throws PortalException {
+        return list("series".equals(module) ? "series" : "vod", category, page, "");
     }
 
     private final Map<String, Object[]> searchCache = new HashMap<>();
