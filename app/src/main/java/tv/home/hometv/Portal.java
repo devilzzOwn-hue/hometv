@@ -482,7 +482,7 @@ public class Portal {
 
     /** Title without trailing tags such as "(Hindi-Netflix) (4K)". */
     static String cleanTitle(String name) {
-        String t = String.valueOf(name).trim();
+        String t = String.valueOf(name).trim().replaceAll("\\s+[-\u2013]\\s+[A-Z0-9][A-Z0-9 &'.]*\\|[^()\\[\\]]*$", "").trim();
         String prev;
         do { prev = t; t = t.replaceAll("\\s*[\\(\\[][^\\(\\)\\[\\]]{1,40}[\\)\\]]\\s*$", "").trim(); } while (!t.equals(prev) && !t.isEmpty());
         return t.isEmpty() ? String.valueOf(name) : t;
@@ -597,21 +597,74 @@ public class Portal {
     }
 
     /** Seasons of a series; each season has its own cmd and a list of episode numbers. */
+    private JSONArray dataOf(Object js) { return js instanceof JSONObject ? ((JSONObject) js).optJSONArray("data") : null; }
+
+    /** Seasons of a show. Two portal layouts are supported:
+     *  - season entries that carry a cmd plus a list of episode numbers (played with create_link ... series=N);
+     *  - season entries with only an id; their episodes are fetched separately (see episodes()).
+     *  Tries the module the show came from first, then the other one. Each entry also says which module answered. */
     public JSONArray seasons(String id, String module) throws PortalException {
-        Object js = call(map("type", "series".equals(module) ? "series" : "vod", "action", "get_ordered_list",
-                "movie_id", id, "season_id", "0", "episode_id", "0", "p", "1"), 30000);
+        String first = "series".equals(module) ? "series" : "vod";
+        String second = "series".equals(first) ? "vod" : "series";
+        PortalException err = null;
+        for (String mod : new String[]{first, second}) {
+            JSONArray data;
+            try {
+                data = dataOf(call(map("type", mod, "action", "get_ordered_list", "movie_id", id,
+                        "season_id", "0", "episode_id", "0", "p", "1"), 30000));
+            } catch (PortalException e) { if (err == null) err = e; continue; }
+            if (data == null || data.length() == 0) continue;
+            JSONArray out = new JSONArray();
+            for (int i = 0; i < data.length(); i++) {
+                JSONObject se = data.optJSONObject(i);
+                if (se == null) continue;
+                String name = se.optString("name", "");
+                if (name.isEmpty() || "null".equals(name)) name = "Season " + (i + 1);
+                String cmd = se.optString("cmd", "");
+                JSONArray eps = new JSONArray();
+                JSONArray sr = se.optJSONArray("series");
+                if (sr != null) for (int j = 0; j < sr.length(); j++) eps.put(String.valueOf(sr.opt(j)));
+                try {
+                    JSONObject o = new JSONObject().put("name", name).put("module", mod).put("season_id", se.optString("id", ""));
+                    if (!cmd.isEmpty() && !"null".equals(cmd)) {
+                        if (eps.length() == 0) eps.put("1");
+                        o.put("cmd", cmd).put("series", eps);
+                    } else {
+                        o.put("lazy", true).put("series", eps);   // episodes come from episodes()
+                    }
+                    out.put(o);
+                } catch (JSONException ignored) { }
+            }
+            if (out.length() > 0) return out;
+        }
+        if (err != null) throw err;
+        return new JSONArray();
+    }
+
+    /** Episodes of one season (for portals where seasons don't carry a cmd). */
+    public JSONArray episodes(String id, String module, String seasonId) throws PortalException {
+        String mod = "series".equals(module) ? "series" : "vod";
         JSONArray out = new JSONArray();
-        JSONArray data = js instanceof JSONObject ? ((JSONObject) js).optJSONArray("data") : null;
-        if (data == null) return out;
-        for (int i = 0; i < data.length(); i++) {
-            JSONObject se = data.optJSONObject(i);
-            if (se == null || se.optString("cmd", "").isEmpty()) continue;
-            JSONArray eps = new JSONArray();
-            JSONArray s = se.optJSONArray("series");
-            if (s != null) for (int j = 0; j < s.length(); j++) eps.put(String.valueOf(s.opt(j)));
-            if (eps.length() == 0) eps.put("1");
-            try { out.put(new JSONObject().put("name", se.optString("name", "Season " + (i + 1))).put("cmd", se.optString("cmd")).put("series", eps)); }
-            catch (JSONException ignored) { }
+        for (int page = 1; page <= 6; page++) {
+            Object js = call(map("type", mod, "action", "get_ordered_list", "movie_id", id,
+                    "season_id", seasonId, "episode_id", "0", "p", String.valueOf(page)), 30000);
+            JSONArray data = dataOf(js);
+            if (data == null || data.length() == 0) break;
+            for (int i = 0; i < data.length(); i++) {
+                JSONObject ep = data.optJSONObject(i);
+                if (ep == null) continue;
+                String num = ep.optString("series_number", "");
+                if (num.isEmpty() || "null".equals(num)) num = String.valueOf(out.length() + 1);
+                String name = ep.optString("name", "");
+                if (name.isEmpty() || "null".equals(name)) name = "Episode " + num;
+                String cmd = ep.optString("cmd", "");
+                try {
+                    out.put(new JSONObject().put("num", num).put("name", name).put("episode_id", ep.optString("id", ""))
+                            .put("cmd", "null".equals(cmd) ? "" : cmd));
+                } catch (JSONException ignored) { }
+            }
+            int total = ((JSONObject) js).optInt("total_items", 0);
+            if (out.length() >= total) break;
         }
         return out;
     }
@@ -676,7 +729,40 @@ public class Portal {
     }
 
     public String link(String kind, String cmd, String series, String id) throws PortalException {
+        return link(kind, cmd, series, id, "", "", "vod");
+    }
+
+    public String link(String kind, String cmd, String series, String id, String seasonId, String episodeId, String module) throws PortalException {
         Object last = null;
+        if (episodeId != null && !episodeId.isEmpty()) {
+            // Episode of a 3-level show: its video files are listed under movie / season / episode.
+            String mod = "series".equals(module) ? "series" : "vod";
+            List<String> tried = new ArrayList<>();
+            if (cmd != null && !cmd.isEmpty()) {
+                last = createLink("vod", cmd, "");
+                tried.add(cmd);
+                String url = extract(last);
+                if (url != null) return remember(url);
+            }
+            JSONArray files = dataOf(call(map("type", mod, "action", "get_ordered_list", "movie_id", id,
+                    "season_id", seasonId, "episode_id", episodeId, "p", "1"), 30000));
+            for (int i = 0; files != null && i < files.length() && i < 4; i++) {
+                JSONObject f = files.optJSONObject(i);
+                if (f == null) continue;
+                LinkedHashSet<String> fc = new LinkedHashSet<>();
+                if (!f.optString("cmd", "").isEmpty()) fc.add(f.optString("cmd"));
+                if (!f.optString("id", "").isEmpty()) fc.add("/media/file_" + f.optString("id") + ".mpg");
+                for (String c : fc) {
+                    if (tried.contains(c)) continue;
+                    last = createLink("vod", c, "");
+                    tried.add(c);
+                    String url = extract(last);
+                    if (url != null) return remember(url);
+                }
+            }
+            throw new PortalException("The portal didn't return a playable link for this episode. Tried: " + tried
+                    + ". Last reply: " + snippet(last) + ". Details: open /debug on your phone.");
+        }
         List<String> tried = new ArrayList<>();
         LinkedHashSet<String> cmds = new LinkedHashSet<>();
         if (cmd != null && !cmd.trim().isEmpty()) cmds.add(cmd);

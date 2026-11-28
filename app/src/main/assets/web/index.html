@@ -312,7 +312,7 @@ window.logoFail = img => { const d=document.createElement('div'); d.className='i
 const LANGS={hindi:'Hindi',english:'English',tamil:'Tamil',telugu:'Telugu',malayalam:'Malayalam',kannada:'Kannada',punjabi:'Punjabi',marathi:'Marathi',bengali:'Bengali',gujarati:'Gujarati',urdu:'Urdu',bhojpuri:'Bhojpuri',odia:'Odia',hin:'Hindi',eng:'English',tam:'Tamil',tel:'Telugu',mal:'Malayalam',kan:'Kannada',pun:'Punjabi','dual audio':'Dual audio','multi audio':'Multi audio',multi:'Multi audio',dubbed:'Dubbed'};
 const QUAL=/^(4k|uhd|fhd|hd|sd|hdr|hdr10|dolby vision|hevc|1080p|720p|2160p|imax)$/i;
 function parseTitle(name){
-  let t=String(name||'').trim(); const groups=[]; let m;
+  let t=String(name||'').trim().replace(/\s+[-–]\s+[A-Z0-9][A-Z0-9 &'.]*\|[^()\[\]]*$/,'').trim(); const groups=[]; let m;
   while((m=t.match(/\s*[\(\[]([^\(\)\[\]]{1,40})[\)\]]\s*$/))){ groups.unshift(m[1]); t=t.slice(0,m.index).trim(); }
   const pre=t.match(/^\s*\|?([A-Z]{2,3})\|?\s*[:\-|]\s+/); if(pre){ groups.push(pre[1]); t=t.slice(pre[0].length); }
   const out={title:t||String(name||''), lang:[], q:[], src:[], year:''};
@@ -781,18 +781,34 @@ async function showSeasons(v){
   setHeading(`<b>${esc(title)}</b> · loading seasons…`); $('#grid').className='grid'; $('#grid').innerHTML=''; $('#more').innerHTML='';
   let seasons=[];
   try{ seasons=(await api('/api/seasons?'+new URLSearchParams({id:v.id, module:v.kind||'vod'}))).seasons||[]; }
-  catch(e){ $('#grid').innerHTML=epCard('data-back="1"','← Back','',h)+`<div class="empty">${esc(e.message)}</div>`; focusFirst('#grid .card'); return; }
+  catch(e){ setHeading(`<b>${esc(title)}</b>`); $('#grid').innerHTML=epCard('data-back="1"','← Back','',h)+`<div class="empty">${esc(e.message)}</div>`; focusFirst('#grid .card'); return; }
   if(!S.sub || S.sub.v!==v) return;
-  if(!seasons.length){ $('#grid').innerHTML=epCard('data-back="1"','← Back','',h)+'<div class="empty">No episodes found for this show.</div>'; focusFirst('#grid .card'); return; }
-  if(seasons.length===1) return showEpisodes(v, seasons[0].cmd, seasons[0].series, title, restoreView);
+  if(!seasons.length){ setHeading(`<b>${esc(title)}</b>`); $('#grid').innerHTML=epCard('data-back="1"','← Back','',h)+'<div class="empty">No episodes found for this show.<br><small>If it plays in StbEmu, open /debug on your phone and send a screenshot.</small></div>'; focusFirst('#grid .card'); return; }
   const render=()=>{
     S.sub={v, seasons, back:restoreView};
-    setHeading(`<b>${esc(title)}</b> · ${seasons.length} seasons`);
+    setHeading(`<b>${esc(title)}</b> · ${seasons.length} season${seasons.length===1?'':'s'}`);
     $('#grid').className='grid'; $('#more').innerHTML=''; $('#content').scrollTop=0;
-    $('#grid').innerHTML=epCard('data-back="1"','← Back','',h)+seasons.map((se,i)=>epCard(`data-season="${i}"`, se.name||('Season '+(i+1)), `${se.series.length} episodes`, h)).join('');
+    $('#grid').innerHTML=epCard('data-back="1"','← Back','',h)+seasons.map((se,i)=>epCard(`data-season="${i}"`, se.name||('Season '+(i+1)), se.series&&se.series.length?`${se.series.length} episodes`:'', h)).join('');
     focusFirst('#grid .card[data-season]');
   };
-  S.renderSeasons=render; render();
+  S.renderSeasons=render;
+  if(seasons.length===1) return openSeason(v, seasons[0], restoreView);
+  render();
+}
+async function openSeason(v, se, back){
+  const title=parseTitle(v.name).title+(se.name?' · '+se.name:'');
+  if(!se.lazy) return showEpisodes(v, se.cmd, se.series, title, back);
+  const h=hueOf(v.name);
+  S.sub={v, back};
+  setHeading(`<b>${esc(title)}</b> · loading episodes…`); $('#grid').className='grid'; $('#grid').innerHTML=''; $('#more').innerHTML='';
+  let eps=[];
+  try{ eps=(await api('/api/episodes?'+new URLSearchParams({id:v.id, module:se.module||v.kind||'vod', season:se.season_id}))).episodes||[]; }
+  catch(e){ setHeading(`<b>${esc(title)}</b>`); $('#grid').innerHTML=epCard('data-back="1"','← Back','',h)+`<div class="empty">${esc(e.message)}</div>`; focusFirst('#grid .card'); return; }
+  if(!S.sub || S.sub.v!==v) return;
+  S.sub={v, season:se, eps, back};
+  setHeading(`<b>${esc(title)}</b> · ${eps.length} episode${eps.length===1?'':'s'}`);
+  $('#grid').innerHTML=epCard('data-back="1"','← Back','',h)+(eps.length?eps.map((ep,i)=>epCard(`data-epi="${i}"`, 'Episode '+ep.num, ep.name && !/^episode\s*\d+$/i.test(ep.name)?ep.name:'', h)).join(''):'<div class="empty">No episodes found in this season.</div>');
+  $('#content').scrollTop=0; focusFirst('#grid .card[data-epi]');
 }
 function showEpisodes(v, cmd, eps, title, back){
   S.sub={v, cmd, back};
@@ -801,6 +817,12 @@ function showEpisodes(v, cmd, eps, title, back){
   $('#grid').className='grid'; $('#more').innerHTML=''; $('#content').scrollTop=0;
   $('#grid').innerHTML=epCard('data-back="1"','← Back','',h)+eps.map(n=>epCard(`data-ep="${esc(n)}"`,'Episode '+n,'',h)).join('');
   focusFirst('#grid .card[data-ep]');
+}
+function playEpisode(v, se, ep){
+  const p=parseTitle(v.name);
+  S.cur={kind:'vod', v, p, title:`${p.title} · ${se.name?se.name+' · ':''}Episode ${ep.num}`, sub:ep.name&&!/^episode\s*\d+$/i.test(ep.name)?ep.name:[p.year||v.year, v.desc].filter(Boolean).join(' — ')};
+  openPlayer(); renderOSD();
+  startStream('vod',{cmd:ep.cmd||'', series:'', id:v.id, season:se.season_id||'', episode:ep.episode_id||'', module:se.module||v.kind||'vod'});
 }
 function playVod(v, ep, cmd){
   const p=parseTitle(v.name);
@@ -1127,8 +1149,9 @@ document.addEventListener('click',e=>{
   if(b.dataset.back){ if(S.sub) S.sub.back(); return; }
   if(b.dataset.season!==undefined && S.sub && S.sub.seasons){
     const v=S.sub.v, se=S.sub.seasons[+b.dataset.season];
-    showEpisodes(v, se.cmd, se.series, parseTitle(v.name).title+' · '+(se.name||'Season'), S.renderSeasons); return;
+    openSeason(v, se, S.renderSeasons); return;
   }
+  if(b.dataset.epi!==undefined && S.sub && S.sub.eps){ playEpisode(S.sub.v, S.sub.season, S.sub.eps[+b.dataset.epi]); return; }
   if(b.dataset.ep){ playVod(S.sub.v, b.dataset.ep, S.sub.cmd); return; }
   if(b.dataset.id){
     const list=b.closest('.strip')?[...b.closest('.strip').querySelectorAll('.card[data-id]')].map(x=>S.byId.get(x.dataset.id)).filter(Boolean):S.list;

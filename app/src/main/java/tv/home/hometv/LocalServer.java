@@ -263,6 +263,7 @@ public class LocalServer {
                 json(out, 200, res);
                 return;
             }
+            if (p.equals("/api/episodes")) { json(out, 200, new JSONObject().put("episodes", portal.episodes(str(r.q.get("id")), str(r.q.get("module")), str(r.q.get("season"))))); return; }
             if (p.equals("/api/seasons")) { json(out, 200, new JSONObject().put("seasons", portal.seasons(str(r.q.get("id")), str(r.q.get("module"))))); return; }
             if (p.equals("/api/play") && locked() && "live".equals(str(r.q.get("kind")))) {
                 JSONArray chs = portal.liveListing(false).optJSONArray("channels");
@@ -274,7 +275,8 @@ public class LocalServer {
             if (p.equals("/api/play")) {
                 String url = "live".equals(str(r.q.get("kind")))
                         ? portal.link("live", portal.cmdFor(str(r.q.get("id"))), "", "")
-                        : portal.link("vod", str(r.q.get("cmd")), str(r.q.get("series")), str(r.q.get("id")));
+                        : portal.link("vod", str(r.q.get("cmd")), str(r.q.get("series")), str(r.q.get("id")),
+                                str(r.q.get("season")), str(r.q.get("episode")), str(r.q.get("module")));
                 JSONArray subs = "live".equals(str(r.q.get("kind"))) ? new JSONArray() : portal.subtitles(portal.lastLinkReply());
                 json(out, 200, new JSONObject().put("type", streamType(url)).put("url", proxied(url)).put("subtitles", subs));
                 return;
