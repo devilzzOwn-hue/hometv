@@ -204,6 +204,7 @@ video::cue{background:rgba(0,0,0,.65);color:#fff;font-size:2.2rem;line-height:1.
 #toast{position:fixed;left:50%;bottom:2rem;transform:translate(-50%,1rem);background:rgba(30,36,48,.95);border:1px solid var(--line);padding:.7rem 1.2rem;border-radius:.7rem;opacity:0;transition:.25s;z-index:40;pointer-events:none}
 #toast.show{opacity:1;transform:translate(-50%,0)}
 
+@media (hover:none){#tip{display:none}}
 @media (max-width:760px){
   header{flex-wrap:wrap;gap:.6rem;padding:.7rem .9rem}
   .search{order:3;flex-basis:100%;max-width:none}#clock{display:none}
@@ -262,7 +263,7 @@ video::cue{background:rgba(0,0,0,.65);color:#fff;font-size:2.2rem;line-height:1.
 </main>
 
 <div id="player" hidden>
-  <video id="video" playsinline crossorigin="anonymous"></video>
+  <video id="video" playsinline webkit-playsinline disableremoteplayback crossorigin="anonymous"></video>
   <div id="spinner"></div>
   <div id="osd">
     <div class="osd-top"><span id="osd-num"></span><span id="osd-name"></span></div>
@@ -906,6 +907,7 @@ async function startStream(kind, params){
   catch(e){ if(my===playToken) failMsg(e.message); return; }
   if(my!==playToken) return;
   info.url=new URL(info.url, location.href).href;
+  try{ video.disableRemotePlayback=true; }catch(e){}
   const fail=m=>{ if(my===playToken) failMsg(m); };
   try{
     if(info.type==='hls'){

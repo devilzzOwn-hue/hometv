@@ -219,7 +219,7 @@ public class LocalServer {
     private void route(Req r, OutputStream out) throws IOException {
         String p = r.path;
         boolean lanAllowed = p.equals("/setup") || p.equals("/api/config") || p.equals("/debug");
-        if (!r.local && !lanAllowed) { error(out, 403, "Only the Setup page is available from other devices"); return; }
+        if (!r.local && !lanAllowed && !cfg.allowLan()) { error(out, 403, "Watching from other devices is turned off in Home TV Settings"); return; }
         try {
             if (p.equals("/") || p.equals("/index.html")) { asset(out, "index.html"); return; }
             if (p.equals("/setup")) { asset(out, "setup.html"); return; }
@@ -314,6 +314,7 @@ public class LocalServer {
         JSONObject o = cfg.toJson();
         String ip = lanIp();
         o.put("setup_url", ip == null ? "" : "http://" + ip + ":" + port + "/setup");
+        o.put("watch_url", ip == null ? "" : "http://" + ip + ":" + port + "/");
         json(out, 200, o);
     }
 

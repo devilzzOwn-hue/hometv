@@ -65,6 +65,7 @@ button:focus{outline:3px solid var(--focus);outline-offset:2px}
     <label>Parental PIN <small id="pinNote">(4 digits, hides adult categories until entered; leave blank to keep the current PIN)</small></label>
     <input name="parental_pin" class="nav" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="new-password" placeholder="••••">
     <label class="check"><input type="checkbox" name="single_stream" class="nav" checked> Only one stream at a time (protects a 1-screen plan)</label>
+    <label class="check"><input type="checkbox" name="allow_lan" class="nav" checked> Allow phones and laptops on this Wi-Fi to watch <small id="watchUrl"></small></label>
     <div class="btns">
       <button type="submit" class="primary nav" id="save">Save &amp; connect</button>
       <button type="button" class="nav" id="cont">Continue</button>
@@ -81,6 +82,7 @@ async function load(){
   try{
     const r=await fetch('/api/config'); const c=await r.json();
     for(const el of f.elements){ if(!el.name || el.name==='parental_pin') continue; if(el.type==='checkbox') el.checked=!!c[el.name]; else if(c[el.name]) el.value=c[el.name]; }
+    if(c.watch_url) $('#watchUrl').textContent='(open '+c.watch_url+' in the browser)';
     if(c.pin_set) $('#pinNote').textContent='(a PIN is set; type a new one to change it, or leave blank to keep it)';
     if(isTV && c.setup_url){ $('#setupUrl').textContent=c.setup_url; $('#phoneHint').hidden=false; }
     $('#cont').hidden=!isTV || !c.configured;

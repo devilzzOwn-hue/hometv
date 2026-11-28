@@ -29,6 +29,9 @@ public class Config {
         return v;
     }
 
+    /** Let phones / laptops on the same Wi-Fi open the full app (not just Settings). */
+    public boolean allowLan() { return sp.getBoolean("allow_lan", true); }
+
     public boolean singleStream() {
         return sp.getBoolean("single_stream", true);
     }
@@ -45,6 +48,7 @@ public class Config {
         o.put("model", get("model"));
         o.put("timezone", get("timezone"));
         o.put("single_stream", singleStream());
+        o.put("allow_lan", allowLan());
         o.put("configured", isConfigured());
         o.put("pin_set", !pin().isEmpty());
         return o;
@@ -56,6 +60,7 @@ public class Config {
             if (o.has(k)) e.putString(k, o.optString(k, "").trim());
         }
         if (o.has("single_stream")) e.putBoolean("single_stream", o.optBoolean("single_stream", true));
+        if (o.has("allow_lan")) e.putBoolean("allow_lan", o.optBoolean("allow_lan", true));
         String pin = o.optString("parental_pin", "").trim();
         if (pin.matches("\\d{4,8}")) e.putString("parental_pin", pin);   // blank = keep the current PIN
         e.commit();
